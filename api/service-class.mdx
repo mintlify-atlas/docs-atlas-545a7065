@@ -169,6 +169,30 @@ let service = UserServiceImpl(
 )
 ```
 
+## Related: ServiceContainer
+
+SwiftRequest also provides a `ServiceContainer` class as an alternative base for service implementations:
+
+```swift
+public class ServiceContainer {
+    let baseURL: URL
+    let session: URLSession
+    
+    public init(baseURL: URL, session: URLSession = .shared)
+    convenience public init(baseURL: String, session: URLSession = .shared)
+}
+```
+
+This class is similar to `Service` but holds a `URLSession` directly instead of a `ServiceExecutor`. It's primarily used for simpler use cases or backward compatibility.
+
+**Properties:**
+- `baseURL`: The base URL for requests
+- `session`: The URLSession for making requests
+
+<Note>
+The `Service` class with `ServiceExecutor` is the recommended approach as it provides more flexibility for custom networking implementations.
+</Note>
+
 ## Notes
 
 - The `Service` class is `open`, allowing you to subclass it if needed
