@@ -1,0 +1,302 @@
+---
+title: HTTP Methods
+description: Complete guide to HTTP method macros in SwiftRequest
+---
+
+## Overview
+
+SwiftRequest provides dedicated macros for each standard HTTP method. These macros are attached to service protocol methods and define the HTTP operation, endpoint path, and how path parameters are interpolated.
+
+## Available HTTP Methods
+
+SwiftRequest supports seven HTTP method macros:
+
+- `@GET` - Retrieve resources
+- `@POST` - Create new resources
+- `@PUT` - Update/replace resources
+- `@PATCH` - Partially update resources
+- `@DELETE` - Remove resources
+- `@HEAD` - Retrieve headers only
+- `@OPTIONS` - Retrieve supported methods
+
+All macros accept an optional path parameter that defines the endpoint path relative to the service's base URL or resource URL.
+
+## @GET
+
+Used for retrieving resources from the API.
+
+### Basic Usage
+
+```swift
+@Service
+protocol UserService {
+    @GET("users")
+    func getUsers() async throws -> [User]
+}
+```
+
+### With Path Parameters
+
+```swift
+@Service
+protocol UserService {
+    @GET("users/{id}")
+    func getUser(@Path id: String) async throws -> User
+    
+    @GET("users/{userId}/posts/{postId}")
+    func getUserPost(@Path userId: String, @Path postId: String) async throws -> Post
+}
+```
+
+### With Query Parameters
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+}
+```
+
+### Empty Path
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @GET
+    func getUsers() async throws -> [User]
+    
+    // Equivalent to:
+    @GET("")
+    func getAllUsers() async throws -> [User]
+}
+```
+
+<Tip>
+When using `@GET` without arguments or with an empty string, the request is made to the base URL or resource URL directly.
+</Tip>
+
+## @POST
+
+Used for creating new resources, typically with a request body.
+
+### With Body
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @POST
+    func createUser(@Body user: User) async throws -> User
+}
+```
+
+### With Path and Body
+
+```swift
+@Service(resource: "sample")
+protocol SampleService {
+    @POST("hello/{id}/{limit}")
+    func hello(@Path id: String, @Path limit: Int) async throws -> [Int]
+}
+```
+
+### With Form Fields
+
+```swift
+@Service
+protocol AuthService {
+    @POST("login")
+    func login(
+        @FormField username: String,
+        @FormField password: String
+    ) async throws -> AuthToken
+}
+```
+
+## @PUT
+
+Used for updating or replacing entire resources.
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @PUT("{id}")
+    func updateUser(@Path id: String, @Body user: User) async throws -> User
+}
+```
+
+<Note>
+`@PUT` typically replaces the entire resource, while `@PATCH` is used for partial updates.
+</Note>
+
+## @PATCH
+
+Used for partially updating resources.
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @PATCH("{id}")
+    func updateUserName(@Path id: String, @Body update: UserNameUpdate) async throws -> User
+}
+```
+
+## @DELETE
+
+Used for removing resources.
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @DELETE("{id}")
+    func deleteUser(@Path id: String) async throws -> Void
+}
+```
+
+### With Response
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @DELETE("{id}")
+    func deleteUser(@Path id: String) async throws -> DeleteResponse
+}
+```
+
+## @HEAD
+
+Used for retrieving response headers without the body.
+
+```swift
+@Service(resource: "files")
+protocol FileService {
+    @HEAD("{id}")
+    func checkFileExists(@Path id: String) async throws -> Data
+}
+```
+
+<Tip>
+`@HEAD` is useful for checking if a resource exists or retrieving metadata without downloading the full response body.
+</Tip>
+
+## @OPTIONS
+
+Used for retrieving supported HTTP methods for a resource.
+
+```swift
+@Service
+protocol APIService {
+    @OPTIONS("users")
+    func getUsersOptions() async throws -> Data
+}
+```
+
+## Path Parameter Syntax
+
+All HTTP method macros support path parameters using curly brace syntax:
+
+### Single Parameter
+
+```swift
+@GET("{id}")
+func getItem(@Path id: String) async throws -> Item
+```
+
+### Multiple Parameters
+
+```swift
+@GET("users/{userId}/posts/{postId}")
+func getUserPost(@Path userId: String, @Path postId: Int) async throws -> Post
+```
+
+### With Argument Labels
+
+```swift
+@GET("{id}")
+func getQuote(@Path by id: String) async throws -> Quote
+```
+
+Path parameters are interpolated into the URL at runtime:
+
+```swift
+// For: @GET("users/{userId}/posts/{postId}")
+// With: userId = "123", postId = "456"
+// Generates: baseURL/users/123/posts/456
+```
+
+<Warning>
+Path parameters cannot be optional. If you mark a `@Path` parameter as optional, you'll get a compilation error:
+```swift
+// ❌ This will fail
+@GET("{id}")
+func getItem(@Path id: String?) async throws -> Item
+```
+</Warning>
+
+## Combining Parameters
+
+You can combine different parameter types in a single method:
+
+```swift
+@Service(resource: "api")
+protocol ComplexService {
+    @POST("users/{userId}/posts")
+    func createPost(
+        @Path userId: String,
+        @Header("Authorization") token: String,
+        @QueryParam featured: Bool?,
+        @Body post: Post
+    ) async throws -> Post
+}
+```
+
+This generates a request with:
+- Path: `baseURL/api/users/{userId}/posts`
+- Header: `Authorization: {token}`
+- Query: `?featured={featured}` (if provided)
+- Body: JSON-encoded `Post` object
+
+## Method Request Generation
+
+The HTTP method macros work with the `ServiceMethodExpander` to generate request construction code:
+
+```swift
+// Source
+@GET("random")
+func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+
+// Generated implementation
+func getRandomQuotes(limit: Int? = nil) async throws -> [Quote] {
+    let request = Request(
+        url: resourceURL.appendingPathComponent("random"),
+        queryParams: ["limit": limit]
+    )
+    return try await executor(request)
+}
+```
+
+For methods other than `GET`, the HTTP method is explicitly set:
+
+```swift
+// Source
+@POST("users")
+func createUser(@Body user: User) async throws -> User
+
+// Generated implementation
+func createUser(user: User) async throws -> User {
+    let request = Request(
+        url: baseURL.appendingPathComponent("users"),
+        method: "POST",
+        body: user
+    )
+    return try await executor(request)
+}
+```
+
+## Best Practices
+
+1. **Use semantic HTTP methods**: Choose the method that matches the operation's intent
+2. **Keep paths simple**: Use path parameters instead of complex query strings when identifying resources
+3. **Group related endpoints**: Use the `@Service(resource:)` parameter to avoid repeating common path prefixes
+4. **Type safety**: Leverage Swift's type system for path and query parameters
+5. **Optional parameters**: Use optional types for query parameters that aren't always required

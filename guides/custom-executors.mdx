@@ -1,0 +1,407 @@
+---
+title: Custom Executors
+description: Create custom executors to integrate with different networking libraries
+---
+
+SwiftRequest uses the `ServiceExecutor` protocol to handle the actual execution of HTTP requests. This abstraction allows you to integrate with any networking library or customize request/response handling.
+
+## When to Create Custom Executors
+
+Consider creating a custom executor when you need to:
+
+- Integrate with a specific networking library (Alamofire, Moya, etc.)
+- Add custom logging or analytics
+- Implement custom retry logic
+- Modify request/response behavior globally
+- Add request/response interceptors
+- Use a different JSON decoder configuration
+
+## ServiceExecutor Protocol
+
+The `ServiceExecutor` protocol is simple and powerful:
+
+```swift
+public protocol ServiceExecutor {
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse)
+}
+```
+
+Your custom executor must:
+1. Accept a `Request` object containing URL, method, headers, query params, form fields, and body
+2. Execute the HTTP request
+3. Return a tuple of `(Data, HTTPURLResponse)` on success
+4. Throw an error on failure
+
+The protocol also provides default implementations for decoding responses:
+
+```swift
+extension ServiceExecutor {
+    public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> Output {
+        let (output, _): (Output, _) = try await self(request)
+        return output
+    }
+    
+    public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> (Output, HTTPURLResponse) {
+        let (data, response): (Data, HTTPURLResponse) = try await self.execute(request)
+        let output = try JSONDecoder().decode(Output.self, from: data)
+        return (output, response)
+    }
+    
+    public func callAsFunction(_ request: Request) async throws -> Data {
+        let (data, _) = try await self(request)
+        return data
+    }
+    
+    public func callAsFunction(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        return try await execute(request)
+    }
+}
+```
+
+This is from Sources/SwiftRequest/ServiceExecutor.swift:7-27.
+
+## Default Implementation
+
+SwiftRequest includes a default `URLSessionServiceExecutor`:
+
+```swift
+public class URLSessionServiceExecutor: ServiceExecutor {
+    private let session: URLSession
+    
+    public init(_ session: URLSession = .shared) {
+        self.session = session
+    }
+    
+    public func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        let urlRequest = try request.asURLRequest()
+        let (data, response) = try await session.data(for: urlRequest) as! (Data, HTTPURLResponse)
+        guard (200..<300).contains(response.statusCode) else {
+            throw HTTPResponseError(data: data, response: response)
+        }
+        return (data, response)
+    }
+}
+```
+
+This implementation from Sources/SwiftRequest/URLSessionServiceExecutor.swift:3-18:
+- Uses `URLSession` for requests
+- Validates status codes (2xx range)
+- Throws `HTTPResponseError` for non-success responses
+
+## Creating a Custom Executor
+
+<Steps>
+  <Step title="Import required modules">
+    ```swift
+    import Foundation
+    import SwiftRequest
+    ```
+  </Step>
+
+  <Step title="Create a class conforming to ServiceExecutor">
+    ```swift
+    class MyCustomExecutor: ServiceExecutor {
+        // Implementation goes here
+    }
+    ```
+  </Step>
+
+  <Step title="Implement the execute method">
+    ```swift
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        // Convert Request to your library's request type
+        // Execute the request
+        // Return (Data, HTTPURLResponse)
+    }
+    ```
+  </Step>
+
+  <Step title="Use your custom executor">
+    ```swift
+    let executor = MyCustomExecutor()
+    let service = QuoteServiceImpl(
+        baseURL: "https://api.quotable.io",
+        executor: executor
+    )
+    ```
+  </Step>
+</Steps>
+
+## Example: Alamofire Integration
+
+Here's a complete example of integrating Alamofire from Examples/Sources/AlamofireServiceExecutor.swift:
+
+```swift
+import Foundation
+import Alamofire
+import SwiftRequest
+
+class AlamofireServiceExecutor: ServiceExecutor {
+    let session: Session
+    
+    struct Error: Swift.Error {
+        let response: DataResponse<Data, AFError>
+    }
+    
+    init(_ session: Session = .default) {
+        self.session = session
+    }
+    
+    func execute(_ request: SwiftRequest.Request) async throws -> (Data, HTTPURLResponse) {
+        let task = session.request(request).serializingData()
+        let response = await task.response
+        
+        if let data = response.data, let urlResponse = response.response {
+            return (data, urlResponse)
+        }
+        
+        if let error = response.error {
+            throw error
+        }
+        
+        throw Error(response: response)
+    }
+}
+
+extension SwiftRequest.Request: URLRequestConvertible {}
+```
+
+Key points from this implementation:
+
+### Session Management
+
+```swift
+let session: Session
+
+init(_ session: Session = .default) {
+    self.session = session
+}
+```
+
+Accept an Alamofire `Session` in the initializer, defaulting to `.default`.
+
+### Request Conversion
+
+```swift
+extension SwiftRequest.Request: URLRequestConvertible {}
+```
+
+SwiftRequest's `Request` type already conforms to `URLRequestConvertible` through its `asURLRequest()` method, making it compatible with Alamofire.
+
+### Error Handling
+
+```swift
+struct Error: Swift.Error {
+    let response: DataResponse<Data, AFError>
+}
+
+if let error = response.error {
+    throw error
+}
+
+throw Error(response: response)
+```
+
+Define a custom error type to wrap Alamofire errors when needed.
+
+### Async Execution
+
+```swift
+let task = session.request(request).serializingData()
+let response = await task.response
+
+if let data = response.data, let urlResponse = response.response {
+    return (data, urlResponse)
+}
+```
+
+Use Alamofire's async/await support to execute requests and extract the response.
+
+## Using Custom Executors
+
+Once you've created a custom executor, use it when initializing your service:
+
+```swift
+import Foundation
+import SwiftRequest
+
+let useAlamofire: Bool = Bool.random()
+print("Using Alamofire: \(useAlamofire)")
+
+let executor: any ServiceExecutor = if useAlamofire {
+    AlamofireServiceExecutor()
+} else {
+    URLSessionServiceExecutor()
+}
+
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch {
+    print(error)
+}
+```
+
+This example from Examples/Sources/main.swift:4-23 shows how you can easily switch between executors at runtime.
+
+## Advanced Patterns
+
+<AccordionGroup>
+  <Accordion title="Custom JSON Decoder">
+    Override the default JSON decoding behavior:
+
+    ```swift
+    class CustomDecoderExecutor: ServiceExecutor {
+        private let urlSession: URLSessionServiceExecutor
+        private let decoder: JSONDecoder
+        
+        init(session: URLSession = .shared, decoder: JSONDecoder) {
+            self.urlSession = URLSessionServiceExecutor(session)
+            self.decoder = decoder
+        }
+        
+        func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+            return try await urlSession.execute(request)
+        }
+        
+        func callAsFunction<Output: Decodable>(_ request: Request) async throws -> Output {
+            let (data, _) = try await execute(request)
+            return try decoder.decode(Output.self, from: data)
+        }
+    }
+
+    // Usage with custom date decoding
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    
+    let executor = CustomDecoderExecutor(decoder: decoder)
+    let service = QuoteServiceImpl(baseURL: baseURL, executor: executor)
+    ```
+  </Accordion>
+
+  <Accordion title="Request/Response Logging">
+    Add logging to all requests:
+
+    ```swift
+    class LoggingExecutor: ServiceExecutor {
+        private let wrapped: ServiceExecutor
+        
+        init(wrapping executor: ServiceExecutor = URLSessionServiceExecutor()) {
+            self.wrapped = executor
+        }
+        
+        func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+            print("[REQUEST] \(request.method) \(request.url)")
+            if let queryParams = request.queryParams {
+                print("[PARAMS] \(queryParams)")
+            }
+            
+            let start = Date()
+            do {
+                let (data, response) = try await wrapped.execute(request)
+                let duration = Date().timeIntervalSince(start)
+                print("[RESPONSE] \(response.statusCode) in \(duration)s")
+                return (data, response)
+            } catch {
+                let duration = Date().timeIntervalSince(start)
+                print("[ERROR] \(error) in \(duration)s")
+                throw error
+            }
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Retry Logic">
+    Implement automatic retries for failed requests:
+
+    ```swift
+    class RetryExecutor: ServiceExecutor {
+        private let wrapped: ServiceExecutor
+        private let maxRetries: Int
+        private let retryDelay: TimeInterval
+        
+        init(
+            wrapping executor: ServiceExecutor = URLSessionServiceExecutor(),
+            maxRetries: Int = 3,
+            retryDelay: TimeInterval = 1.0
+        ) {
+            self.wrapped = executor
+            self.maxRetries = maxRetries
+            self.retryDelay = retryDelay
+        }
+        
+        func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+            var lastError: Error?
+            
+            for attempt in 0..<maxRetries {
+                do {
+                    return try await wrapped.execute(request)
+                } catch {
+                    lastError = error
+                    if attempt < maxRetries - 1 {
+                        try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                    }
+                }
+            }
+            
+            throw lastError!
+        }
+    }
+
+    // Usage
+    let executor = RetryExecutor(maxRetries: 3, retryDelay: 2.0)
+    let service = QuoteServiceImpl(baseURL: baseURL, executor: executor)
+    ```
+  </Accordion>
+
+  <Accordion title="Combining Executors">
+    Chain multiple executor behaviors:
+
+    ```swift
+    let baseExecutor = URLSessionServiceExecutor()
+    let loggingExecutor = LoggingExecutor(wrapping: baseExecutor)
+    let retryExecutor = RetryExecutor(wrapping: loggingExecutor)
+    
+    let service = QuoteServiceImpl(
+        baseURL: "https://api.quotable.io",
+        executor: retryExecutor
+    )
+    ```
+
+    This creates a chain: Retry → Logging → URLSession
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+1. **Keep executors focused**: Each executor should have a single responsibility (logging, retrying, etc.)
+
+2. **Support wrapping**: Design executors to wrap other executors for composability
+
+3. **Handle errors properly**: Convert library-specific errors to standard Swift errors or `HTTPResponseError`
+
+4. **Respect the protocol contract**: Always return `(Data, HTTPURLResponse)` on success
+
+5. **Make executors reusable**: Accept configuration in the initializer rather than hardcoding values
+
+6. **Test thoroughly**: Custom executors are critical infrastructure - write tests for edge cases
+
+## Integration with Other Libraries
+
+The executor pattern makes it easy to integrate with any HTTP library that supports async/await:
+
+- **Alamofire**: See the complete example above
+- **Moya**: Wrap Moya's provider and convert responses
+- **Custom networking**: Implement your own HTTP client
+- **Mock responses**: Create a mock executor for testing
+
+The key is implementing the `execute` method to return `(Data, HTTPURLResponse)` using your chosen library.

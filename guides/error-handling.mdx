@@ -1,0 +1,548 @@
+---
+title: Error Handling
+description: Handle HTTP errors and network failures in SwiftRequest
+---
+
+SwiftRequest provides structured error handling for HTTP requests, allowing you to gracefully handle failures and provide meaningful feedback to users.
+
+## HTTPResponseError
+
+When a request receives a non-success HTTP status code (outside the 200-299 range), the default `URLSessionServiceExecutor` throws an `HTTPResponseError`:
+
+```swift
+public struct HTTPResponseError: Error {
+    public let data: Data
+    public let response: HTTPURLResponse
+    
+    public init(data: Data, response: HTTPURLResponse) {
+        self.data = data
+        self.response = response
+    }
+}
+```
+
+This is from Sources/SwiftRequest/HTTPResponseError.swift:3-11.
+
+The error contains:
+- `data`: The response body (often contains error details from the API)
+- `response`: The full `HTTPURLResponse` with status code, headers, etc.
+
+## Basic Error Handling
+
+### Try/Catch Pattern
+
+Use Swift's standard try/catch to handle errors:
+
+```swift
+import SwiftRequest
+
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+
+do {
+    let quote = try await service.getQuote(by: "invalid-id")
+    print(quote)
+} catch {
+    print("Error: \(error)")
+}
+```
+
+### Handling Specific Error Types
+
+Catch specific error types for different handling:
+
+```swift
+do {
+    let quote = try await service.getQuote(by: id)
+    print(quote)
+} catch let error as HTTPResponseError {
+    print("HTTP error \(error.response.statusCode)")
+} catch {
+    print("Other error: \(error)")
+}
+```
+
+## Working with HTTPResponseError
+
+### Accessing Status Code
+
+```swift
+do {
+    let quote = try await service.getQuote(by: id)
+    processQuote(quote)
+} catch let error as HTTPResponseError {
+    switch error.response.statusCode {
+    case 400:
+        print("Bad request")
+    case 401:
+        print("Unauthorized - please log in")
+    case 404:
+        print("Quote not found")
+    case 500...599:
+        print("Server error")
+    default:
+        print("HTTP error \(error.response.statusCode)")
+    }
+} catch {
+    print("Network error: \(error)")
+}
+```
+
+### Decoding Error Response Body
+
+Many APIs return structured error information in the response body:
+
+```swift
+struct APIError: Codable {
+    let message: String
+    let code: String
+}
+
+do {
+    let post = try await service.createPost(request: newPost)
+    print("Created: \(post.id)")
+} catch let error as HTTPResponseError {
+    if let apiError = try? JSONDecoder().decode(APIError.self, from: error.data) {
+        print("API Error: \(apiError.message) (\(apiError.code))")
+    } else {
+        print("HTTP \(error.response.statusCode)")
+    }
+} catch {
+    print("Request failed: \(error)")
+}
+```
+
+### Accessing Response Headers
+
+```swift
+catch let error as HTTPResponseError {
+    if let retryAfter = error.response.value(forHTTPHeaderField: "Retry-After") {
+        print("Rate limited. Retry after \(retryAfter) seconds")
+    }
+    print("Status: \(error.response.statusCode)")
+}
+```
+
+## Response Validation
+
+The default `URLSessionServiceExecutor` validates status codes:
+
+```swift
+public func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+    let urlRequest = try request.asURLRequest()
+    let (data, response) = try await session.data(for: urlRequest) as! (Data, HTTPURLResponse)
+    guard (200..<300).contains(response.statusCode) else {
+        throw HTTPResponseError(data: data, response: response)
+    }
+    return (data, response)
+}
+```
+
+From Sources/SwiftRequest/URLSessionServiceExecutor.swift:10-17:
+- Status codes 200-299: Success, returns data
+- Other status codes: Throws `HTTPResponseError`
+
+### Custom Validation
+
+Create a custom executor for different validation logic:
+
+```swift
+class CustomValidationExecutor: ServiceExecutor {
+    private let session: URLSession
+    
+    init(_ session: URLSession = .shared) {
+        self.session = session
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        let urlRequest = try request.asURLRequest()
+        let (data, response) = try await session.data(for: urlRequest) as! (Data, HTTPURLResponse)
+        
+        // Custom validation: Accept 2xx and 3xx as success
+        guard (200..<400).contains(response.statusCode) else {
+            throw HTTPResponseError(data: data, response: response)
+        }
+        
+        return (data, response)
+    }
+}
+```
+
+## Common Error Scenarios
+
+<AccordionGroup>
+  <Accordion title="Network Connectivity Errors">
+    Handle network failures when the device is offline:
+
+    ```swift
+    import Foundation
+
+    do {
+        let quotes = try await service.getRandomQuotes(limit: 5)
+        displayQuotes(quotes)
+    } catch let error as URLError {
+        switch error.code {
+        case .notConnectedToInternet:
+            showAlert("No internet connection")
+        case .timedOut:
+            showAlert("Request timed out")
+        case .cannotFindHost:
+            showAlert("Cannot reach server")
+        default:
+            showAlert("Network error: \(error.localizedDescription)")
+        }
+    } catch {
+        showAlert("An error occurred: \(error)")
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Authentication Errors">
+    Handle 401 Unauthorized responses:
+
+    ```swift
+    do {
+        let profile = try await service.getProfile(authorization: token)
+        updateUI(with: profile)
+    } catch let error as HTTPResponseError where error.response.statusCode == 401 {
+        // Token expired, need to re-authenticate
+        await refreshAuthToken()
+        // Retry the request
+        let profile = try await service.getProfile(authorization: newToken)
+        updateUI(with: profile)
+    } catch {
+        showError(error)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Rate Limiting">
+    Handle 429 Too Many Requests:
+
+    ```swift
+    do {
+        let data = try await service.fetchData()
+        process(data)
+    } catch let error as HTTPResponseError where error.response.statusCode == 429 {
+        if let retryAfter = error.response.value(forHTTPHeaderField: "Retry-After"),
+           let seconds = TimeInterval(retryAfter) {
+            print("Rate limited. Waiting \(seconds) seconds...")
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            // Retry request
+            let data = try await service.fetchData()
+            process(data)
+        } else {
+            showAlert("Too many requests. Please try again later.")
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Validation Errors">
+    Handle 400 Bad Request with detailed error messages:
+
+    ```swift
+    struct ValidationError: Codable {
+        let field: String
+        let message: String
+    }
+
+    struct ValidationResponse: Codable {
+        let errors: [ValidationError]
+    }
+
+    do {
+        let post = try await service.createPost(request: newPost)
+        print("Created successfully")
+    } catch let error as HTTPResponseError where error.response.statusCode == 400 {
+        if let validation = try? JSONDecoder().decode(ValidationResponse.self, from: error.data) {
+            for error in validation.errors {
+                showFieldError(field: error.field, message: error.message)
+            }
+        } else {
+            showAlert("Invalid request")
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Server Errors">
+    Handle 5xx server errors with retry logic:
+
+    ```swift
+    func fetchWithRetry(maxAttempts: Int = 3) async throws -> [Quote] {
+        var lastError: Error?
+        
+        for attempt in 1...maxAttempts {
+            do {
+                return try await service.getRandomQuotes(limit: 5)
+            } catch let error as HTTPResponseError where (500...599).contains(error.response.statusCode) {
+                lastError = error
+                if attempt < maxAttempts {
+                    let delay = TimeInterval(attempt * 2) // Exponential backoff
+                    print("Server error, retrying in \(delay)s...")
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            } catch {
+                throw error // Don't retry non-server errors
+            }
+        }
+        
+        throw lastError!
+    }
+
+    // Usage
+    do {
+        let quotes = try await fetchWithRetry()
+        displayQuotes(quotes)
+    } catch {
+        showAlert("Server is currently unavailable")
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Error Handling in SwiftUI
+
+### Using @State for Error Display
+
+```swift
+import SwiftUI
+
+struct QuoteView: View {
+    @State private var quote: Quote?
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    
+    var body: some View {
+        VStack {
+            if let quote = quote {
+                Text(quote.content)
+                    .font(.body)
+                Text("- \(quote.author)")
+                    .font(.caption)
+            } else if let error = errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+                Button("Retry") {
+                    Task { await loadQuote() }
+                }
+            } else if isLoading {
+                ProgressView()
+            }
+        }
+        .task {
+            await loadQuote()
+        }
+    }
+    
+    func loadQuote() async {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let quotes = try await service.getRandomQuotes(limit: 1)
+            self.quote = quotes.first
+        } catch let error as HTTPResponseError {
+            errorMessage = "HTTP Error: \(error.response.statusCode)"
+        } catch {
+            errorMessage = "Failed to load quote: \(error.localizedDescription)"
+        }
+        
+        isLoading = false
+    }
+}
+```
+
+### Using Alert for Error Display
+
+```swift
+struct QuoteListView: View {
+    @State private var quotes: [Quote] = []
+    @State private var error: Error?
+    @State private var showError = false
+    
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    
+    var body: some View {
+        List(quotes, id: \.id) { quote in
+            VStack(alignment: .leading) {
+                Text(quote.content)
+                Text(quote.author)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .task {
+            await loadQuotes()
+        }
+        .alert("Error", isPresented: $showError, presenting: error) { _ in
+            Button("OK") { }
+            Button("Retry") {
+                Task { await loadQuotes() }
+            }
+        } message: { error in
+            if let httpError = error as? HTTPResponseError {
+                Text("HTTP Error: \(httpError.response.statusCode)")
+            } else {
+                Text(error.localizedDescription)
+            }
+        }
+    }
+    
+    func loadQuotes() async {
+        do {
+            quotes = try await service.getRandomQuotes(limit: 10)
+        } catch {
+            self.error = error
+            showError = true
+        }
+    }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always handle errors">
+    Never ignore errors from async throws functions:
+
+    ```swift
+    // Bad
+    let quotes = try! await service.getRandomQuotes(limit: 5)
+
+    // Good
+    do {
+        let quotes = try await service.getRandomQuotes(limit: 5)
+        processQuotes(quotes)
+    } catch {
+        handleError(error)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Provide user-friendly messages">
+    Convert technical errors to user-friendly messages:
+
+    ```swift
+    func userFriendlyMessage(for error: Error) -> String {
+        if let httpError = error as? HTTPResponseError {
+            switch httpError.response.statusCode {
+            case 404:
+                return "The requested item was not found."
+            case 401:
+                return "Please log in to continue."
+            case 500...599:
+                return "Server error. Please try again later."
+            default:
+                return "An error occurred. Please try again."
+            }
+        } else if let urlError = error as? URLError {
+            if urlError.code == .notConnectedToInternet {
+                return "No internet connection. Please check your network."
+            }
+        }
+        return "An unexpected error occurred."
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Log errors for debugging">
+    Log detailed error information for debugging:
+
+    ```swift
+    do {
+        let quote = try await service.getQuote(by: id)
+        return quote
+    } catch let error as HTTPResponseError {
+        print("[ERROR] HTTP \(error.response.statusCode)")
+        print("[ERROR] URL: \(error.response.url?.absoluteString ?? "unknown")")
+        if let body = String(data: error.data, encoding: .utf8) {
+            print("[ERROR] Body: \(body)")
+        }
+        throw error
+    } catch {
+        print("[ERROR] \(error)")
+        throw error
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Implement retry logic wisely">
+    Only retry appropriate errors:
+
+    ```swift
+    func shouldRetry(_ error: Error) -> Bool {
+        if let httpError = error as? HTTPResponseError {
+            // Retry server errors and rate limits
+            return (500...599).contains(httpError.response.statusCode) ||
+                   httpError.response.statusCode == 429
+        }
+        if let urlError = error as? URLError {
+            // Retry timeouts and temporary network issues
+            return urlError.code == .timedOut ||
+                   urlError.code == .networkConnectionLost
+        }
+        return false
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Complete Example
+
+Here's a complete example with comprehensive error handling:
+
+```swift
+import Foundation
+import SwiftRequest
+
+struct Quote: Codable {
+    let id: String
+    let content: String
+    let author: String
+    let tags: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case content
+        case author
+        case tags
+    }
+}
+
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch let error as HTTPResponseError {
+    print("HTTP Error \(error.response.statusCode)")
+    if let body = String(data: error.data, encoding: .utf8) {
+        print("Response: \(body)")
+    }
+} catch let error as URLError {
+    print("Network Error: \(error.localizedDescription)")
+} catch {
+    print("Unexpected Error: \(error)")
+}
+```
+
+This pattern from Examples/Sources/main.swift:15-23 demonstrates:
+- Basic do/catch structure
+- Multiple error types
+- Clean error handling
+- Appropriate error messages

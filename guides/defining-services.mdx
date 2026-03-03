@@ -1,0 +1,329 @@
+---
+title: Defining Services
+description: Learn how to create type-safe service definitions using the @Service macro
+---
+
+SwiftRequest uses Swift macros to generate type-safe HTTP service implementations from protocol definitions. The `@Service` macro transforms your protocol into a complete HTTP client with minimal boilerplate.
+
+## Creating Your First Service
+
+<Steps>
+  <Step title="Define a protocol">
+    Start by creating a protocol that represents your API service:
+
+    ```swift
+    import SwiftRequest
+
+    protocol QuoteService {
+        // Methods will go here
+    }
+    ```
+  </Step>
+
+  <Step title="Add the @Service macro">
+    Annotate your protocol with `@Service` and optionally specify a resource path:
+
+    ```swift
+    @Service(resource: "quotes")
+    protocol QuoteService {
+        // Methods will go here
+    }
+    ```
+
+    The `resource` parameter is appended to your base URL. For example, with a base URL of `https://api.example.com`, requests will be made to `https://api.example.com/quotes`.
+  </Step>
+
+  <Step title="Define service methods">
+    Add methods with HTTP method macros like `@GET`, `@POST`, etc.:
+
+    ```swift
+    @Service(resource: "quotes")
+    protocol QuoteService {
+        @GET("random")
+        func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+        
+        @GET("{id}")
+        func getQuote(@Path by id: String) async throws -> Quote
+    }
+    ```
+  </Step>
+
+  <Step title="Use the generated implementation">
+    The macro automatically generates a `QuoteServiceImpl` class:
+
+    ```swift
+    let service = QuoteServiceImpl(
+        baseURL: "https://api.quotable.io"
+    )
+    ```
+  </Step>
+</Steps>
+
+## Service Configuration
+
+### With Resource Path
+
+Specify a resource path that gets appended to the base URL:
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes() async throws -> [Quote]
+}
+
+// Requests go to: {baseURL}/quotes/random
+```
+
+### Without Resource Path
+
+Omit the resource parameter to make requests directly to paths:
+
+```swift
+@Service()
+protocol APIService {
+    @GET("status")
+    func getStatus() async throws -> Status
+}
+
+// Requests go to: {baseURL}/status
+```
+
+## HTTP Method Macros
+
+SwiftRequest supports all standard HTTP methods:
+
+```swift
+@Service(resource: "posts")
+protocol BlogService {
+    @GET("{id}")
+    func getPost(@Path id: String) async throws -> Post
+    
+    @POST("")
+    func createPost(@Body post: Post) async throws -> Post
+    
+    @PUT("{id}")
+    func updatePost(@Path id: String, @Body post: Post) async throws -> Post
+    
+    @PATCH("{id}")
+    func patchPost(@Path id: String, @Body updates: [String: Any]) async throws -> Post
+    
+    @DELETE("{id}")
+    func deletePost(@Path id: String) async throws
+    
+    @HEAD("{id}")
+    func checkPost(@Path id: String) async throws
+    
+    @OPTIONS("")
+    func getOptions() async throws
+}
+```
+
+## Parameter Macros
+
+SwiftRequest provides macros to map function parameters to different parts of the HTTP request:
+
+### @Path - URL Path Parameters
+
+Replace placeholders in the path with dynamic values:
+
+```swift
+@GET("{id}")
+func getQuote(@Path by id: String) async throws -> Quote
+
+@POST("hello/{id}/{limit}")
+func hello(@Path id: String, @Path limit: Int) async throws -> [Int]
+```
+
+Use `{parameterName}` in the path string. The parameter name matches the function parameter name (or the label if using `by id` syntax).
+
+### @QueryParam - Query String Parameters
+
+Add query parameters to the URL:
+
+```swift
+@GET("random")
+func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+
+// Makes request to: /random?limit=3
+```
+
+Optional parameters are automatically excluded when `nil`.
+
+### @Header - HTTP Headers
+
+Set custom headers on the request:
+
+```swift
+@GET("protected")
+func getProtectedData(@Header authorization: String) async throws -> Data
+```
+
+### @FormField - Form Data
+
+Send form-encoded data:
+
+```swift
+@POST("login")
+func login(
+    @FormField username: String,
+    @FormField password: String
+) async throws -> AuthResponse
+```
+
+### @Body - Request Body
+
+Send JSON-encoded request body:
+
+```swift
+@POST("")
+func createPost(@Body post: Post) async throws -> Post
+```
+
+The body is automatically encoded to JSON using `JSONEncoder`.
+
+## Real-World Example
+
+Here's a complete example from the SwiftRequest Examples directory:
+
+```swift
+import Foundation
+import SwiftRequest
+
+// Define the response model
+struct Quote: Codable {
+    let id: String
+    let content: String
+    let author: String
+    let tags: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case content
+        case author
+        case tags
+    }
+}
+
+// Define the service
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+
+// Use the service
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+let quotes = try await service.getRandomQuotes(limit: 3)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use descriptive method names">
+    Choose method names that clearly describe what the endpoint does:
+
+    ```swift
+    // Good
+    func getRandomQuotes() async throws -> [Quote]
+    func createPost(@Body post: Post) async throws -> Post
+
+    // Avoid
+    func fetch() async throws -> [Quote]
+    func save(@Body data: Post) async throws -> Post
+    ```
+  </Accordion>
+
+  <Accordion title="Make optional parameters explicit">
+    Use optional types for parameters that may not always be provided:
+
+    ```swift
+    @GET("search")
+    func search(
+        @QueryParam query: String,
+        @QueryParam limit: Int? = nil,
+        @QueryParam offset: Int? = nil
+    ) async throws -> [Result]
+    ```
+  </Accordion>
+
+  <Accordion title="Group related endpoints in services">
+    Organize your services by resource or domain:
+
+    ```swift
+    @Service(resource: "users")
+    protocol UserService {
+        // All user-related endpoints
+    }
+
+    @Service(resource: "posts")
+    protocol PostService {
+        // All post-related endpoints
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Use Codable models for type safety">
+    Define Codable models for request and response bodies:
+
+    ```swift
+    struct CreatePostRequest: Codable {
+        let title: String
+        let content: String
+        let tags: [String]
+    }
+
+    @POST("")
+    func createPost(@Body request: CreatePostRequest) async throws -> Post
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns
+
+### Authentication Headers
+
+Add authentication to individual methods:
+
+```swift
+@Service(resource: "api")
+protocol AuthenticatedService {
+    @GET("profile")
+    func getProfile(@Header authorization: String) async throws -> Profile
+    
+    @POST("update")
+    func updateProfile(
+        @Header authorization: String,
+        @Body profile: Profile
+    ) async throws -> Profile
+}
+```
+
+### Pagination
+
+Handle paginated endpoints with query parameters:
+
+```swift
+@GET("posts")
+func getPosts(
+    @QueryParam page: Int = 1,
+    @QueryParam perPage: Int = 20
+) async throws -> [Post]
+```
+
+### Path with Multiple Segments
+
+Combine resource paths with dynamic segments:
+
+```swift
+@Service(resource: "sample")
+protocol SampleService {
+    @POST("hello/{id}/{limit}")
+    func hello(@Path id: String, @Path limit: Int) async throws -> [Int]
+}
+
+// Makes request to: /sample/hello/123/10
+```

@@ -1,0 +1,478 @@
+---
+title: Advanced Patterns
+description: Explore advanced techniques and patterns for building robust API clients with SwiftRequest
+---
+
+## Custom Executor Usage
+
+SwiftRequest supports custom executors, allowing you to use any HTTP client library. Here's how to create an Alamofire-based executor.
+
+<CodeGroup>
+
+```swift AlamofireServiceExecutor
+import Foundation
+import Alamofire
+import SwiftRequest
+
+class AlamofireServiceExecutor: ServiceExecutor {
+    let session: Session
+    
+    struct Error: Swift.Error {
+        let response: DataResponse<Data, AFError>
+    }
+    
+    init(_ session: Session = .default) {
+        self.session = session
+    }
+    
+    func execute(_ request: SwiftRequest.Request) async throws -> (Data, HTTPURLResponse) {
+        let task = session.request(request).serializingData()
+        let response = await task.response
+        
+        if let data = response.data, let urlResponse = response.response {
+            return (data, urlResponse)
+        }
+        
+        if let error = response.error {
+            throw error
+        }
+        
+        throw Error(response: response)
+    }
+}
+
+// Make Request compatible with Alamofire
+extension SwiftRequest.Request: URLRequestConvertible {}
+```
+
+```swift Usage
+import SwiftRequest
+
+let executor = AlamofireServiceExecutor()
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+
+let quotes = try await service.getRandomQuotes(limit: 3)
+```
+
+```swift Switching Executors
+// You can easily switch between different executors
+let useAlamofire = true
+
+let executor: any ServiceExecutor = if useAlamofire {
+    AlamofireServiceExecutor()
+} else {
+    URLSessionServiceExecutor()
+}
+
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+```
+
+</CodeGroup>
+
+The `ServiceExecutor` protocol is simple to implement:
+
+```swift
+public protocol ServiceExecutor {
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse)
+}
+```
+
+## Form Field Parameters
+
+Use `@FormField` to send data as form fields instead of JSON. This is useful for traditional form submissions.
+
+<Tabs>
+  <Tab title="Basic Form Fields">
+    ```swift
+    @Service(resource: "auth")
+    protocol AuthService {
+        @POST("login")
+        func login(
+            @FormField username: String,
+            @FormField password: String
+        ) async throws -> AuthToken
+    }
+    
+    // Usage
+    let service = AuthServiceImpl(baseURL: "https://api.example.com")
+    let token = try await service.login(
+        username: "user@example.com",
+        password: "secret123"
+    )
+    // Sends: Content-Type: application/x-www-form-urlencoded
+    // Body: username=user@example.com&password=secret123
+    ```
+  </Tab>
+  
+  <Tab title="Custom Field Names">
+    ```swift
+    @Service(resource: "contact")
+    protocol ContactService {
+        @POST
+        func submit(
+            @FormField("full_name") name: String,
+            @FormField("email_address") email: String,
+            @FormField message: String
+        ) async throws -> SubmissionResult
+    }
+    
+    // Usage
+    let service = ContactServiceImpl(baseURL: "https://api.example.com")
+    let result = try await service.submit(
+        name: "John Doe",
+        email: "john@example.com",
+        message: "Hello!"
+    )
+    ```
+  </Tab>
+  
+  <Tab title="Optional Form Fields">
+    ```swift
+    @Service(resource: "users")
+    protocol UserService {
+        @POST("register")
+        func register(
+            @FormField username: String,
+            @FormField email: String,
+            @FormField phone: String?,
+            @FormField newsletter: Bool?
+        ) async throws -> User
+    }
+    
+    // Usage
+    let service = UserServiceImpl(baseURL: "https://api.example.com")
+    let user = try await service.register(
+        username: "johndoe",
+        email: "john@example.com",
+        phone: nil,  // Optional fields can be nil
+        newsletter: true
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Custom Headers
+
+Add custom headers to your requests using the `@Header` macro.
+
+<Tabs>
+  <Tab title="Authorization Headers">
+    ```swift
+    @Service(resource: "protected")
+    protocol ProtectedService {
+        @GET("data")
+        func getData(
+            @Header("Authorization") auth: String
+        ) async throws -> Data
+    }
+    
+    // Usage
+    let service = ProtectedServiceImpl(baseURL: "https://api.example.com")
+    let data = try await service.getData(auth: "Bearer \(token)")
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Headers">
+    ```swift
+    @Service(resource: "api")
+    protocol APIService {
+        @POST("upload")
+        func uploadData(
+            @Header("Authorization") auth: String,
+            @Header("X-API-Version") apiVersion: String,
+            @Header("Content-Type") contentType: String,
+            @Body data: UploadData
+        ) async throws -> UploadResult
+    }
+    
+    // Usage
+    let service = APIServiceImpl(baseURL: "https://api.example.com")
+    let result = try await service.uploadData(
+        auth: "Bearer \(token)",
+        apiVersion: "2.0",
+        contentType: "application/json",
+        data: uploadData
+    )
+    ```
+  </Tab>
+  
+  <Tab title="Optional Headers">
+    ```swift
+    @Service(resource: "content")
+    protocol ContentService {
+        @GET("articles")
+        func getArticles(
+            @Header("Accept-Language") language: String?,
+            @Header("X-Request-ID") requestId: String?
+        ) async throws -> [Article]
+    }
+    
+    // Usage
+    let service = ContentServiceImpl(baseURL: "https://api.example.com")
+    
+    // With headers
+    let articles = try await service.getArticles(
+        language: "en-US",
+        requestId: UUID().uuidString
+    )
+    
+    // Without headers (nil values are omitted)
+    let defaultArticles = try await service.getArticles(
+        language: nil,
+        requestId: nil
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Error Handling Patterns
+
+Properly handle errors in your SwiftRequest-based services.
+
+<Tabs>
+  <Tab title="Basic Error Handling">
+    ```swift
+    import SwiftRequest
+    
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    
+    do {
+        let quotes = try await service.getRandomQuotes(limit: 3)
+        print("Fetched \(quotes.count) quotes")
+    } catch {
+        print("Error: \(error)")
+    }
+    ```
+  </Tab>
+  
+  <Tab title="HTTP Error Handling">
+    ```swift
+    import SwiftRequest
+    
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    
+    do {
+        let quote = try await service.getQuote(by: "invalid-id")
+        print(quote)
+    } catch let error as HTTPResponseError {
+        // Handle HTTP errors with status codes
+        print("HTTP Error: \(error.response.statusCode)")
+        
+        if let responseBody = String(data: error.data, encoding: .utf8) {
+            print("Response: \(responseBody)")
+        }
+        
+        switch error.response.statusCode {
+        case 404:
+            print("Quote not found")
+        case 401:
+            print("Unauthorized")
+        case 500...599:
+            print("Server error")
+        default:
+            print("Unknown error")
+        }
+    } catch {
+        print("Other error: \(error)")
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Custom Error Handling">
+    ```swift
+    import SwiftRequest
+    
+    struct APIError: Codable {
+        let code: String
+        let message: String
+    }
+    
+    func handleAPICall() async {
+        let service = UserServiceImpl(baseURL: "https://api.example.com")
+        
+        do {
+            let user = try await service.getUser(id: "123")
+            print("User: \(user)")
+        } catch let error as HTTPResponseError {
+            // Try to decode API error response
+            if let apiError = try? JSONDecoder().decode(APIError.self, from: error.data) {
+                print("API Error [\(apiError.code)]: \(apiError.message)")
+            } else {
+                print("HTTP \(error.response.statusCode)")
+            }
+        } catch {
+            print("Network error: \(error)")
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Retry Logic">
+    ```swift
+    import SwiftRequest
+    
+    func fetchWithRetry<T>(
+        _ operation: () async throws -> T,
+        maxRetries: Int = 3
+    ) async throws -> T {
+        var lastError: Error?
+        
+        for attempt in 0..<maxRetries {
+            do {
+                return try await operation()
+            } catch let error as HTTPResponseError where error.response.statusCode >= 500 {
+                // Retry on server errors
+                lastError = error
+                let delay = UInt64(pow(2.0, Double(attempt))) * 1_000_000_000
+                try await Task.sleep(nanoseconds: delay)
+                continue
+            } catch {
+                // Don't retry on client errors
+                throw error
+            }
+        }
+        
+        throw lastError!
+    }
+    
+    // Usage
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    let quotes = try await fetchWithRetry {
+        try await service.getRandomQuotes(limit: 3)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Multiple Services in One App
+
+Organize your app with multiple services for different API endpoints or backends.
+
+```swift
+import SwiftRequest
+
+// Service 1: User Management
+@Service(resource: "users")
+protocol UserService {
+    @GET("{id}")
+    func getUser(@Path id: String) async throws -> User
+    
+    @POST
+    func createUser(@Body user: CreateUserRequest) async throws -> User
+}
+
+// Service 2: Posts
+@Service(resource: "posts")
+protocol PostService {
+    @GET
+    func getPosts(@QueryParam userId: String?) async throws -> [Post]
+    
+    @GET("{id}")
+    func getPost(@Path id: String) async throws -> Post
+}
+
+// Service 3: Comments
+@Service(resource: "comments")
+protocol CommentService {
+    @GET
+    func getComments(@QueryParam postId: String) async throws -> [Comment]
+    
+    @POST
+    func addComment(@Body comment: CreateCommentRequest) async throws -> Comment
+}
+
+// App Container
+class APIClient {
+    let userService: UserService
+    let postService: PostService
+    let commentService: CommentService
+    
+    init(baseURL: String) {
+        let executor = URLSessionServiceExecutor()
+        
+        self.userService = UserServiceImpl(baseURL: baseURL, executor: executor)
+        self.postService = PostServiceImpl(baseURL: baseURL, executor: executor)
+        self.commentService = CommentServiceImpl(baseURL: baseURL, executor: executor)
+    }
+}
+
+// Usage
+let client = APIClient(baseURL: "https://api.example.com")
+
+let user = try await client.userService.getUser(id: "123")
+let posts = try await client.postService.getPosts(userId: user.id)
+let comments = try await client.commentService.getComments(postId: posts.first!.id)
+```
+
+## Custom URLSession Configuration
+
+Customize the underlying URLSession for advanced networking requirements.
+
+```swift
+import SwiftRequest
+import Foundation
+
+// Create custom URLSession configuration
+let configuration = URLSessionConfiguration.default
+configuration.timeoutIntervalForRequest = 30
+configuration.timeoutIntervalForResource = 300
+configuration.httpMaximumConnectionsPerHost = 5
+configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+
+// Add custom headers to all requests
+configuration.httpAdditionalHeaders = [
+    "User-Agent": "MyApp/1.0",
+    "Accept": "application/json"
+]
+
+let session = URLSession(configuration: configuration)
+
+// Use the custom session
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    session: session
+)
+
+let quotes = try await service.getRandomQuotes(limit: 3)
+```
+
+## Combining Parameters
+
+Combine different parameter types in a single request for complex API calls.
+
+```swift
+@Service(resource: "api")
+protocol ComplexService {
+    @POST("{version}/users/{userId}/posts")
+    func createPost(
+        @Path version: String,
+        @Path userId: String,
+        @Header("Authorization") auth: String,
+        @Header("X-Request-ID") requestId: String,
+        @QueryParam publishNow: Bool,
+        @QueryParam notify: Bool?,
+        @Body post: CreatePostRequest
+    ) async throws -> Post
+}
+
+// Usage
+let service = ComplexServiceImpl(baseURL: "https://api.example.com")
+let post = try await service.createPost(
+    version: "v2",
+    userId: "123",
+    auth: "Bearer \(token)",
+    requestId: UUID().uuidString,
+    publishNow: true,
+    notify: true,
+    post: CreatePostRequest(title: "Hello", content: "World")
+)
+// Generates: POST /api/v2/users/123/posts?publishNow=true&notify=true
+// Headers: Authorization: Bearer <token>, X-Request-ID: <uuid>
+// Body: {"title": "Hello", "content": "World"}
+```

@@ -1,0 +1,272 @@
+---
+title: 'Parameter Macros'
+description: 'Macros for annotating function parameters to specify how they map to HTTP request components'
+---
+
+Parameter macros are attached member macros that specify how function parameters should be included in the HTTP request. They control the mapping of Swift function parameters to URL path segments, query parameters, headers, request body, and form fields.
+
+## @Path
+
+```swift
+@attached(member)
+public macro Path(_ name: String = "")
+```
+
+Marks a parameter as a path parameter that replaces a placeholder in the URL path.
+
+### Parameters
+
+<ParamField path="name" type="String" default="">
+  The name of the path parameter in the URL template. If not specified, uses the parameter name from the function signature.
+</ParamField>
+
+### Usage
+
+**Using parameter name:**
+
+```swift
+@GET("users/{id}")
+func getUser(@Path id: String) async throws -> User
+```
+
+**Using custom name:**
+
+```swift
+@GET("users/{id}")
+func getUser(@Path("id") by userId: String) async throws -> User
+```
+
+**Multiple path parameters:**
+
+```swift
+@GET("users/{userId}/posts/{postId}")
+func getPost(@Path userId: String, @Path postId: String) async throws -> Post
+```
+
+### Notes
+
+- Path parameters must match placeholders in the HTTP method's path using `{name}` syntax
+- The parameter type must conform to `CustomStringConvertible`
+- Required for any path template variables
+
+## @QueryParam
+
+```swift
+@attached(member)
+public macro QueryParam(_ name: String = "")
+```
+
+Marks a parameter as a URL query parameter.
+
+### Parameters
+
+<ParamField path="name" type="String" default="">
+  The name of the query parameter in the URL. If not specified, uses the parameter name from the function signature.
+</ParamField>
+
+### Usage
+
+**Basic query parameter:**
+
+```swift
+@GET("quotes/random")
+func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+```
+
+Generates: `GET /quotes/random?limit=5`
+
+**Custom query parameter name:**
+
+```swift
+@GET("search")
+func search(@QueryParam("q") query: String) async throws -> [Result]
+```
+
+Generates: `GET /search?q=swift`
+
+**Multiple query parameters:**
+
+```swift
+@GET("users")
+func getUsers(
+    @QueryParam page: Int?,
+    @QueryParam limit: Int?,
+    @QueryParam sort: String?
+) async throws -> [User]
+```
+
+Generates: `GET /users?page=1&limit=10&sort=name`
+
+### Notes
+
+- Optional parameters (`T?`) are omitted from the query string if `nil`
+- The parameter type must conform to `CustomStringConvertible`
+- Query parameters are automatically URL-encoded
+
+## @Header
+
+```swift
+@attached(member)
+public macro Header(_ name: String = "")
+```
+
+Marks a parameter as an HTTP header.
+
+### Parameters
+
+<ParamField path="name" type="String" default="">
+  The name of the HTTP header. If not specified, uses the parameter name from the function signature.
+</ParamField>
+
+### Usage
+
+**Basic header:**
+
+```swift
+@GET("protected")
+func getProtected(@Header authorization: String) async throws -> Data
+```
+
+**Custom header name:**
+
+```swift
+@GET("data")
+func getData(@Header("X-API-Key") apiKey: String) async throws -> Data
+```
+
+**Multiple headers:**
+
+```swift
+@POST("upload")
+func upload(
+    @Header authorization: String,
+    @Header("Content-Type") contentType: String,
+    @Body data: Data
+) async throws -> Response
+```
+
+### Notes
+
+- Optional parameters (`T?`) are omitted from headers if `nil`
+- The parameter type must conform to `CustomStringConvertible`
+- Header names are case-insensitive per HTTP specification
+
+## @Body
+
+```swift
+@attached(member)
+public macro Body()
+```
+
+Marks a parameter as the HTTP request body. The parameter will be JSON-encoded using `JSONEncoder`.
+
+### Parameters
+
+This macro takes no parameters.
+
+### Usage
+
+**Creating a resource:**
+
+```swift
+@POST("users")
+func createUser(@Body user: User) async throws -> User
+```
+
+**Updating a resource:**
+
+```swift
+@PUT("users/{id}")
+func updateUser(@Path id: String, @Body user: User) async throws -> User
+```
+
+**Partial updates:**
+
+```swift
+@PATCH("users/{id}")
+func patchUser(@Path id: String, @Body updates: UserUpdate) async throws -> User
+```
+
+### Notes
+
+- The parameter type must conform to `Encodable`
+- Only one `@Body` parameter is allowed per function
+- Automatically sets `Content-Type: application/json` header
+- Cannot be used with `@FormField` in the same function
+- The parameter can be optional (`T?`)
+
+## @FormField
+
+```swift
+@attached(member)
+public macro FormField(_ name: String = "")
+```
+
+Marks a parameter as a form field for URL-encoded form data.
+
+### Parameters
+
+<ParamField path="name" type="String" default="">
+  The name of the form field. If not specified, uses the parameter name from the function signature.
+</ParamField>
+
+### Usage
+
+**Login form:**
+
+```swift
+@POST("login")
+func login(
+    @FormField username: String,
+    @FormField password: String
+) async throws -> Token
+```
+
+**Custom field names:**
+
+```swift
+@POST("register")
+func register(
+    @FormField("user_email") email: String,
+    @FormField("user_password") password: String
+) async throws -> User
+```
+
+**Optional fields:**
+
+```swift
+@POST("contact")
+func sendContact(
+    @FormField name: String,
+    @FormField email: String,
+    @FormField phone: String?
+) async throws -> Response
+```
+
+### Notes
+
+- Automatically sets `Content-Type: application/x-www-form-urlencoded` header
+- Optional parameters (`T?`) are omitted from the form data if `nil`
+- The parameter type must conform to `CustomStringConvertible`
+- Cannot be used with `@Body` in the same function
+- Multiple `@FormField` parameters are allowed
+
+## Combining Parameter Macros
+
+You can combine different parameter macros in the same function:
+
+```swift
+@POST("users/{userId}/posts")
+func createPost(
+    @Path userId: String,
+    @Header authorization: String,
+    @QueryParam notify: Bool?,
+    @Body post: Post
+) async throws -> Post
+```
+
+This generates a request with:
+- Path parameter: `userId` in the URL path
+- Header: `authorization`
+- Query parameter: `notify` (if provided)
+- Request body: JSON-encoded `post`

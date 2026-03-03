@@ -1,0 +1,277 @@
+---
+title: 'ServiceExecutor'
+description: 'Protocol for executing HTTP requests and decoding responses'
+---
+
+The `ServiceExecutor` protocol defines the interface for executing HTTP requests. It provides a single required method and several default implementations for common use cases, including automatic JSON decoding.
+
+## Protocol Definition
+
+```swift
+public protocol ServiceExecutor {
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse)
+}
+```
+
+## Required Method
+
+### execute
+
+```swift
+func execute(_ request: Request) async throws -> (Data, HTTPURLResponse)
+```
+
+<ParamField path="request" type="Request" required>
+  The request to execute.
+</ParamField>
+
+**Returns:** A tuple containing the response data and HTTP response.
+
+**Throws:** Any error that occurs during request execution.
+
+This is the only method you need to implement when creating a custom `ServiceExecutor`.
+
+## Default Implementations
+
+The protocol provides several default implementations that leverage the `execute` method:
+
+### Decodable Response
+
+```swift
+public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> Output
+```
+
+Executes the request and decodes the JSON response to the specified `Decodable` type.
+
+<ParamField path="request" type="Request" required>
+  The request to execute.
+</ParamField>
+
+**Returns:** The decoded response of type `Output`.
+
+**Usage:**
+
+```swift
+let users: [User] = try await executor(request)
+```
+
+### Decodable Response with HTTPURLResponse
+
+```swift
+public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> (Output, HTTPURLResponse)
+```
+
+Executes the request and returns both the decoded response and the HTTP response object.
+
+<ParamField path="request" type="Request" required>
+  The request to execute.
+</ParamField>
+
+**Returns:** A tuple containing the decoded output and HTTP response.
+
+**Usage:**
+
+```swift
+let (users, response): ([User], HTTPURLResponse) = try await executor(request)
+print("Status code: \(response.statusCode)")
+```
+
+### Data Response
+
+```swift
+public func callAsFunction(_ request: Request) async throws -> Data
+```
+
+Executes the request and returns only the response data.
+
+<ParamField path="request" type="Request" required>
+  The request to execute.
+</ParamField>
+
+**Returns:** The raw response data.
+
+**Usage:**
+
+```swift
+let data: Data = try await executor(request)
+```
+
+### Data Response with HTTPURLResponse
+
+```swift
+public func callAsFunction(_ request: Request) async throws -> (Data, HTTPURLResponse)
+```
+
+Executes the request and returns both the data and HTTP response.
+
+<ParamField path="request" type="Request" required>
+  The request to execute.
+</ParamField>
+
+**Returns:** A tuple containing the response data and HTTP response.
+
+**Usage:**
+
+```swift
+let (data, response): (Data, HTTPURLResponse) = try await executor(request)
+```
+
+## URLSessionServiceExecutor
+
+SwiftRequest includes a default implementation of `ServiceExecutor` using `URLSession`.
+
+### Declaration
+
+```swift
+public class URLSessionServiceExecutor: ServiceExecutor
+```
+
+### Initializer
+
+```swift
+public init(_ session: URLSession = .shared)
+```
+
+<ParamField path="session" type="URLSession" default=".shared">
+  The URLSession instance to use for making requests.
+</ParamField>
+
+### Implementation
+
+```swift
+public func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+    let urlRequest = try request.asURLRequest()
+    let (data, response) = try await session.data(for: urlRequest) as! (Data, HTTPURLResponse)
+    guard (200..<300).contains(response.statusCode) else {
+        throw HTTPResponseError(data: data, response: response)
+    }
+    return (data, response)
+}
+```
+
+**Features:**
+- Converts `Request` to `URLRequest`
+- Executes the request using `URLSession`
+- Validates response status code (throws error if not 2xx)
+- Returns data and response
+
+## Creating a Custom Executor
+
+You can create custom executors for different networking libraries or specialized behavior:
+
+### Basic Custom Executor
+
+```swift
+class MyCustomExecutor: ServiceExecutor {
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        // Custom implementation
+        let urlRequest = try request.asURLRequest()
+        
+        // Your networking logic here
+        let (data, response) = try await performRequest(urlRequest)
+        
+        return (data, response)
+    }
+}
+```
+
+### Executor with Logging
+
+```swift
+class LoggingExecutor: ServiceExecutor {
+    private let baseExecutor: ServiceExecutor
+    
+    init(baseExecutor: ServiceExecutor = URLSessionServiceExecutor()) {
+        self.baseExecutor = baseExecutor
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        print("Executing: \(request.method) \(request.url)")
+        
+        let (data, response) = try await baseExecutor.execute(request)
+        
+        print("Response: \(response.statusCode)")
+        
+        return (data, response)
+    }
+}
+```
+
+### Executor with Retry Logic
+
+```swift
+class RetryExecutor: ServiceExecutor {
+    private let baseExecutor: ServiceExecutor
+    private let maxRetries: Int
+    
+    init(baseExecutor: ServiceExecutor = URLSessionServiceExecutor(), maxRetries: Int = 3) {
+        self.baseExecutor = baseExecutor
+        self.maxRetries = maxRetries
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        var lastError: Error?
+        
+        for attempt in 1...maxRetries {
+            do {
+                return try await baseExecutor.execute(request)
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    try await Task.sleep(nanoseconds: UInt64(attempt) * 1_000_000_000)
+                }
+            }
+        }
+        
+        throw lastError!
+    }
+}
+```
+
+## Usage Examples
+
+### Using URLSessionServiceExecutor
+
+```swift
+let service = UserServiceImpl(
+    baseURL: "https://api.example.com",
+    executor: URLSessionServiceExecutor()
+)
+```
+
+### Custom URLSession Configuration
+
+```swift
+let configuration = URLSessionConfiguration.default
+configuration.timeoutIntervalForRequest = 30
+configuration.httpAdditionalHeaders = ["User-Agent": "MyApp/1.0"]
+
+let session = URLSession(configuration: configuration)
+let executor = URLSessionServiceExecutor(session)
+
+let service = UserServiceImpl(
+    baseURL: "https://api.example.com",
+    executor: executor
+)
+```
+
+### Using Custom Executor
+
+```swift
+let executor = LoggingExecutor(
+    baseExecutor: RetryExecutor(maxRetries: 3)
+)
+
+let service = UserServiceImpl(
+    baseURL: "https://api.example.com",
+    executor: executor
+)
+```
+
+## Notes
+
+- All default implementations use `JSONDecoder()` for decoding responses
+- The `callAsFunction` implementations allow executors to be called like functions
+- `URLSessionServiceExecutor` throws `HTTPResponseError` for non-2xx status codes
+- Custom executors can add features like logging, retry logic, authentication, or integration with other networking libraries
+- The executor is specified when creating a service instance and is used for all requests made by that service

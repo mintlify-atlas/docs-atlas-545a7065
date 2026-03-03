@@ -1,0 +1,147 @@
+---
+title: Installation
+description: Add SwiftRequest to your Swift project using Swift Package Manager or Xcode
+---
+
+# Installation
+
+SwiftRequest can be installed using Swift Package Manager, either through Xcode or by editing your `Package.swift` file directly.
+
+## Requirements
+
+<Note>
+  SwiftRequest requires **Swift 5.9+** and **Xcode 15+** because it uses the Swift macro system introduced in Swift 5.9.
+</Note>
+
+SwiftRequest supports the following platforms:
+- macOS 10.15+
+- iOS 13+
+- tvOS 13+
+- watchOS 6+
+- Mac Catalyst 13+
+
+## Installation methods
+
+<CodeGroup>
+
+```swift Package.swift
+// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "YourProject",
+    dependencies: [
+        .package(url: "https://github.com/ailtonvivaz/swift-request.git", from: "0.1.0")
+    ],
+    targets: [
+        .target(
+            name: "YourTarget",
+            dependencies: [
+                .product(name: "SwiftRequest", package: "swift-request")
+            ]
+        )
+    ]
+)
+```
+
+```text Xcode
+1. Open your project in Xcode
+2. Go to File > Add Package Dependency
+3. Paste the repository URL:
+   https://github.com/ailtonvivaz/swift-request.git
+4. Select the version (from: 0.1.0)
+5. Add to your target
+```
+
+</CodeGroup>
+
+## Swift Package Manager
+
+<Steps>
+  <Step title="Add the dependency">
+    Add SwiftRequest to your `Package.swift` dependencies array:
+
+    ```swift
+    dependencies: [
+        .package(url: "https://github.com/ailtonvivaz/swift-request.git", from: "0.1.0")
+    ]
+    ```
+  </Step>
+
+  <Step title="Add to your target">
+    Add SwiftRequest to your target's dependencies:
+
+    ```swift
+    targets: [
+        .target(
+            name: "YourTarget",
+            dependencies: [
+                .product(name: "SwiftRequest", package: "swift-request")
+            ]
+        )
+    ]
+    ```
+  </Step>
+
+  <Step title="Import in your code">
+    Import SwiftRequest in your Swift files:
+
+    ```swift
+    import SwiftRequest
+    ```
+  </Step>
+</Steps>
+
+## Xcode installation
+
+<Steps>
+  <Step title="Open Add Package Dependency">
+    In Xcode, go to **File** > **Add Package Dependency**
+  </Step>
+
+  <Step title="Paste the repository URL">
+    Enter the SwiftRequest repository URL:
+
+    ```
+    https://github.com/ailtonvivaz/swift-request.git
+    ```
+  </Step>
+
+  <Step title="Select version">
+    Choose the version rule. We recommend using "Up to Next Major Version" starting from `0.1.0`
+  </Step>
+
+  <Step title="Add to target">
+    Select the target(s) where you want to use SwiftRequest and click **Add Package**
+  </Step>
+
+  <Step title="Import in your code">
+    Import SwiftRequest in your Swift files:
+
+    ```swift
+    import SwiftRequest
+    ```
+  </Step>
+</Steps>
+
+## Verify installation
+
+To verify SwiftRequest is installed correctly, create a simple service:
+
+```swift
+import SwiftRequest
+
+@Service(resource: "test")
+protocol TestService {
+    @GET
+    func test() async throws -> Data
+}
+```
+
+If this compiles without errors, SwiftRequest is installed and ready to use.
+
+## Next steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Build your first HTTP service with SwiftRequest
+</Card>

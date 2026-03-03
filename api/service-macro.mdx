@@ -1,0 +1,78 @@
+---
+title: '@Service'
+description: 'Macro for generating service implementations from protocol definitions'
+---
+
+The `@Service` macro is an attached peer macro that generates a concrete implementation class for your service protocol. It creates a class that inherits from `Service` and implements all the protocol methods.
+
+## Signature
+
+```swift
+@attached(peer, names: suffixed(Impl))
+public macro Service(resource: String)
+
+@attached(peer, names: suffixed(Impl))
+public macro Service()
+```
+
+## Parameters
+
+<ParamField path="resource" type="String" default="">
+  Base resource path to prepend to all endpoint paths in the service. This is combined with the service's `baseURL` to form the complete URL.
+</ParamField>
+
+## What It Generates
+
+The `@Service` macro generates a class with the suffix `Impl` (e.g., `QuoteServiceImpl`) that:
+
+- Inherits from the `Service` base class
+- Implements the protocol it's attached to
+- Contains implementations for all HTTP method-annotated functions
+- Provides access to `baseURL` and `executor` properties
+
+## Usage
+
+### Basic Service
+
+```swift
+@Service
+protocol UserService {
+    @GET("users")
+    func getUsers() async throws -> [User]
+}
+```
+
+### Service with Resource Path
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+```
+
+In this example, the `resource` parameter "quotes" is prepended to all paths:
+- `getRandomQuotes` → `/quotes/random`
+- `getQuote` → `/quotes/{id}`
+
+### Instantiating the Generated Service
+
+```swift
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: URLSessionServiceExecutor()
+)
+
+let quotes = try await service.getRandomQuotes(limit: 5)
+```
+
+## Notes
+
+- The generated implementation class is named by appending `Impl` to the protocol name
+- Must be applied to a protocol definition
+- All protocol methods should be annotated with HTTP method macros (`@GET`, `@POST`, etc.)
+- The resource path is optional and defaults to an empty string

@@ -1,0 +1,157 @@
+---
+title: 'HTTP Method Macros'
+description: 'Macros for defining HTTP request methods on service protocol functions'
+---
+
+HTTP method macros are attached peer macros that mark protocol methods as HTTP endpoints. Each macro corresponds to a standard HTTP method and generates the implementation that constructs and executes the request.
+
+## Available Macros
+
+### @GET
+
+```swift
+@attached(peer)
+public macro GET(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the GET request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@GET("users")
+func getUsers() async throws -> [User]
+
+@GET("users/{id}")
+func getUser(@Path id: String) async throws -> User
+```
+
+### @POST
+
+```swift
+@attached(peer)
+public macro POST(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the POST request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@POST("users")
+func createUser(@Body user: User) async throws -> User
+
+@POST("login")
+func login(@FormField username: String, @FormField password: String) async throws -> Token
+```
+
+### @PUT
+
+```swift
+@attached(peer)
+public macro PUT(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the PUT request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@PUT("users/{id}")
+func updateUser(@Path id: String, @Body user: User) async throws -> User
+```
+
+### @PATCH
+
+```swift
+@attached(peer)
+public macro PATCH(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the PATCH request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@PATCH("users/{id}")
+func patchUser(@Path id: String, @Body updates: UserUpdate) async throws -> User
+```
+
+### @DELETE
+
+```swift
+@attached(peer)
+public macro DELETE(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the DELETE request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@DELETE("users/{id}")
+func deleteUser(@Path id: String) async throws
+```
+
+### @OPTIONS
+
+```swift
+@attached(peer)
+public macro OPTIONS(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the OPTIONS request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@OPTIONS("users")
+func getUserOptions() async throws -> Data
+```
+
+### @HEAD
+
+```swift
+@attached(peer)
+public macro HEAD(_ path: String = "")
+```
+
+<ParamField path="path" type="String" default="">
+  The endpoint path for the HEAD request. Can include path parameters using `{paramName}` syntax.
+</ParamField>
+
+**Usage:**
+
+```swift
+@HEAD("users/{id}")
+func checkUserExists(@Path id: String) async throws -> HTTPURLResponse
+```
+
+## Path Parameters
+
+All HTTP method macros support path parameters using the `{paramName}` syntax. These are replaced at runtime with values from parameters annotated with `@Path`:
+
+```swift
+@GET("users/{userId}/posts/{postId}")
+func getPost(@Path userId: String, @Path postId: String) async throws -> Post
+```
+
+## Notes
+
+- All methods must be `async throws` functions
+- The path parameter is optional and defaults to an empty string
+- Path parameters must correspond to function parameters marked with `@Path`
+- Return types can be any `Decodable` type, `Data`, or `Void`
+- Combine with parameter macros (`@Path`, `@QueryParam`, `@Header`, `@Body`, `@FormField`) to build complete requests

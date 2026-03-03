@@ -1,0 +1,75 @@
+---
+title: Introduction
+description: SwiftRequest is a lightweight, type-safe HTTP client for Swift using macros to streamline API service definitions
+---
+
+# Introduction to SwiftRequest
+
+SwiftRequest is a lightweight, type-safe HTTP client for Swift, streamlining the construction and execution of HTTP requests. It abstracts away the repetitive boilerplate code that's typically associated with setting up HTTP requests in Swift.
+
+SwiftRequest utilizes macros introduced in Swift 5.9, which can be associated with specific declarations to enhance and extend their functionality.
+
+## Quick example
+
+Here's how you define a service to fetch quotes:
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+```
+
+To make a request, create an instance of the service and call the method:
+
+```swift
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+let quotes = try await service.getRandomQuotes(limit: 5)
+let quote = try await service.getQuote(by: "69Ldsxcdm-")
+```
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Type-safe" icon="shield-check">
+    Built on Swift's type system with compile-time safety using macros
+  </Card>
+  <Card title="Declarative" icon="code">
+    Define services with protocol-based approach and macro annotations
+  </Card>
+  <Card title="Async/await" icon="bolt">
+    Modern Swift concurrency with async/await support out of the box
+  </Card>
+  <Card title="Flexible" icon="puzzle-piece">
+    Customizable service executors for different networking backends
+  </Card>
+</CardGroup>
+
+## Core capabilities
+
+- **Full HTTP method support**: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+- **Rich parameter handling**: Path parameters, query params, headers, body, and form fields
+- **Automatic JSON encoding/decoding**: Seamless Codable integration
+- **Custom executors**: Swap networking backends (URLSession, Alamofire, etc.)
+- **Swift 5.9+ macros**: Built on the modern Swift macro system
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add SwiftRequest to your project with Swift Package Manager
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first service in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/services">
+    Learn about services, methods, and parameters
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/basic-usage">
+    Explore real-world usage patterns
+  </Card>
+</CardGroup>

@@ -1,0 +1,360 @@
+---
+title: Service Executors
+description: Understand how ServiceExecutor enables flexible HTTP client implementations in SwiftRequest
+---
+
+## What are Service Executors?
+
+A `ServiceExecutor` is a protocol that defines how HTTP requests are actually executed. It acts as an abstraction layer between SwiftRequest's high-level API and the underlying HTTP client implementation. This design allows you to swap out the HTTP library without changing your service definitions.
+
+## Why Service Executors Exist
+
+Service executors provide several key benefits:
+
+1. **Flexibility**: Switch between HTTP libraries (URLSession, Alamofire, etc.) without modifying service code
+2. **Testability**: Create mock executors for testing without making real network requests
+3. **Customization**: Implement custom retry logic, logging, authentication, or error handling
+4. **Separation of concerns**: Keep request definition separate from execution details
+
+## The ServiceExecutor Protocol
+
+The `ServiceExecutor` protocol is simple but powerful:
+
+```swift
+import Foundation
+
+public protocol ServiceExecutor {
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse)
+}
+```
+
+The protocol requires a single method:
+
+<ParamField path="execute" type="(Request) async throws -> (Data, HTTPURLResponse)">
+  Executes an HTTP request and returns the response data and HTTP response object.
+</ParamField>
+
+### Input: Request
+
+The `Request` struct encapsulates all HTTP request details:
+
+```swift
+public struct Request {
+    let url: URL
+    let method: String
+    let queryParams: [String: (any CustomStringConvertible)?]?
+    let headers: [String: (any CustomStringConvertible)?]?
+    let formFields: [String: (any CustomStringConvertible)?]?
+    let body: (any Encodable)?
+}
+```
+
+### Output: Response Tuple
+
+The executor returns:
+- `Data`: The response body
+- `HTTPURLResponse`: The HTTP response with status code, headers, etc.
+
+### Convenience Methods
+
+The protocol extension provides convenient overloads for common use cases:
+
+```swift
+extension ServiceExecutor {
+    // Decode JSON response automatically
+    public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> Output
+    
+    // Decode JSON and return response
+    public func callAsFunction<Output: Decodable>(_ request: Request) async throws -> (Output, HTTPURLResponse)
+    
+    // Return raw data
+    public func callAsFunction(_ request: Request) async throws -> Data
+    
+    // Return raw data and response
+    public func callAsFunction(_ request: Request) async throws -> (Data, HTTPURLResponse)
+}
+```
+
+These allow executors to be called directly:
+
+```swift
+let user: User = try await executor(request)
+```
+
+## URLSessionServiceExecutor (Default)
+
+SwiftRequest includes a default executor based on `URLSession`:
+
+```swift
+import Foundation
+
+public class URLSessionServiceExecutor: ServiceExecutor {
+    private let session: URLSession
+    
+    public init(_ session: URLSession = .shared) {
+        self.session = session
+    }
+    
+    public func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        let urlRequest = try request.asURLRequest()
+        let (data, response) = try await session.data(for: urlRequest) as! (Data, HTTPURLResponse)
+        guard (200..<300).contains(response.statusCode) else {
+            throw HTTPResponseError(data: data, response: response)
+        }
+        return (data, response)
+    }
+}
+```
+
+### Features
+
+- **Default session**: Uses `URLSession.shared` by default
+- **Custom sessions**: Accepts custom `URLSession` for configuration
+- **Status code validation**: Automatically throws errors for non-2xx responses
+- **Error handling**: Throws `HTTPResponseError` with response details
+
+### Usage
+
+```swift
+// Using default shared session
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: URLSessionServiceExecutor()
+)
+
+// Using custom session
+let customSession = URLSession(configuration: .ephemeral)
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: URLSessionServiceExecutor(customSession)
+)
+
+// Convenience initializer
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    session: customSession
+)
+```
+
+<Note>
+The `URLSessionServiceExecutor` is used by default if you don't specify an executor when creating a service instance.
+</Note>
+
+## Creating Custom Executors
+
+You can create custom executors for different HTTP libraries or specialized behavior.
+
+### Example: Alamofire Executor
+
+Here's a real example from the SwiftRequest source:
+
+```swift
+import Foundation
+import Alamofire
+import SwiftRequest
+
+class AlamofireServiceExecutor: ServiceExecutor {
+    let session: Session
+    
+    struct Error: Swift.Error {
+        let response: DataResponse<Data, AFError>
+    }
+    
+    init(_ session: Session = .default) {
+        self.session = session
+    }
+    
+    func execute(_ request: SwiftRequest.Request) async throws -> (Data, HTTPURLResponse) {
+        let task = session.request(request).serializingData()
+        let response = await task.response
+        
+        if let data = response.data, let urlResponse = response.response {
+            return (data, urlResponse)
+        }
+        
+        if let error = response.error {
+            throw error
+        }
+        
+        throw Error(response: response)
+    }
+}
+
+extension SwiftRequest.Request: URLRequestConvertible {}
+```
+
+### Example: Mock Executor for Testing
+
+```swift
+import Foundation
+import SwiftRequest
+
+class MockServiceExecutor: ServiceExecutor {
+    var mockResponse: Data
+    var mockStatusCode: Int
+    var mockHeaders: [String: String]
+    
+    init(
+        response: Data = Data(),
+        statusCode: Int = 200,
+        headers: [String: String] = [:]
+    ) {
+        self.mockResponse = response
+        self.mockStatusCode = statusCode
+        self.mockHeaders = headers
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        let response = HTTPURLResponse(
+            url: request.url,
+            statusCode: mockStatusCode,
+            httpVersion: nil,
+            headerFields: mockHeaders
+        )!
+        return (mockResponse, response)
+    }
+}
+
+// Usage in tests
+let mockData = try JSONEncoder().encode(["Test quote"])
+let mockExecutor = MockServiceExecutor(response: mockData)
+let service = QuoteServiceImpl(
+    baseURL: "https://api.test.com",
+    executor: mockExecutor
+)
+
+let quotes = try await service.getRandomQuotes(limit: 1)
+// Returns mocked data without making real network request
+```
+
+### Example: Logging Executor
+
+```swift
+class LoggingServiceExecutor: ServiceExecutor {
+    private let wrappedExecutor: ServiceExecutor
+    
+    init(wrapping executor: ServiceExecutor = URLSessionServiceExecutor()) {
+        self.wrappedExecutor = executor
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        print("[Request] \(request.method) \(request.url)")
+        
+        let start = Date()
+        do {
+            let (data, response) = try await wrappedExecutor.execute(request)
+            let duration = Date().timeIntervalSince(start)
+            print("[Response] \(response.statusCode) in \(duration)s")
+            return (data, response)
+        } catch {
+            let duration = Date().timeIntervalSince(start)
+            print("[Error] \(error) after \(duration)s")
+            throw error
+        }
+    }
+}
+```
+
+### Example: Retry Executor
+
+```swift
+class RetryServiceExecutor: ServiceExecutor {
+    private let wrappedExecutor: ServiceExecutor
+    private let maxRetries: Int
+    private let delay: TimeInterval
+    
+    init(
+        wrapping executor: ServiceExecutor = URLSessionServiceExecutor(),
+        maxRetries: Int = 3,
+        delay: TimeInterval = 1.0
+    ) {
+        self.wrappedExecutor = executor
+        self.maxRetries = maxRetries
+        self.delay = delay
+    }
+    
+    func execute(_ request: Request) async throws -> (Data, HTTPURLResponse) {
+        var lastError: Error?
+        
+        for attempt in 0...maxRetries {
+            do {
+                return try await wrappedExecutor.execute(request)
+            } catch {
+                lastError = error
+                if attempt < maxRetries {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+        }
+        
+        throw lastError!
+    }
+}
+```
+
+## Choosing an Executor
+
+Executors can be specified at service initialization:
+
+```swift
+import Foundation
+import SwiftRequest
+
+let useAlamofire: Bool = Bool.random()
+print("Using Alamofire: \(useAlamofire)")
+
+let executor: any ServiceExecutor = if useAlamofire {
+    AlamofireServiceExecutor()
+} else {
+    URLSessionServiceExecutor()
+}
+
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+
+let quotes = try await service.getRandomQuotes(limit: 3)
+```
+
+<Tip>
+You can compose executors by wrapping one executor with another:
+
+```swift
+let executor = LoggingServiceExecutor(
+    wrapping: RetryServiceExecutor(
+        wrapping: URLSessionServiceExecutor()
+    )
+)
+```
+
+This creates a chain: logging → retry → URLSession
+</Tip>
+
+## Best Practices
+
+1. **Use the default for simple cases**: `URLSessionServiceExecutor` works well for most apps
+2. **Create mocks for testing**: Mock executors eliminate network dependencies in tests
+3. **Compose executors**: Wrap executors to add functionality like logging, retries, or auth
+4. **Handle errors appropriately**: Implement proper error handling in custom executors
+5. **Validate responses**: Check status codes and throw appropriate errors
+6. **Thread safety**: Ensure your executor implementation is safe for concurrent use
+
+## Integration with Services
+
+Generated service implementations use the executor to perform requests:
+
+```swift
+// Generated by @Service macro
+class QuoteServiceImpl: Service, QuoteService {
+    func getRandomQuotes(limit: Int? = nil) async throws -> [Quote] {
+        let request = Request(
+            url: resourceURL.appendingPathComponent("random"),
+            queryParams: ["limit": limit]
+        )
+        return try await executor(request)  // Calls ServiceExecutor
+    }
+}
+```
+
+The `executor` property is inherited from the base `Service` class and is set during initialization.

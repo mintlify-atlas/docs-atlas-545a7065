@@ -1,0 +1,419 @@
+---
+title: Parameters
+description: Learn how to use parameter macros to define request components in SwiftRequest
+---
+
+## Overview
+
+SwiftRequest provides five parameter macros that control how function parameters are mapped to HTTP request components. These macros are attached to method parameters in your service protocol and determine whether a value becomes part of the URL path, query string, headers, form data, or request body.
+
+## Available Parameter Macros
+
+- `@Path` - URL path parameters
+- `@QueryParam` - URL query string parameters
+- `@Header` - HTTP headers
+- `@Body` - Request body (JSON-encoded)
+- `@FormField` - Form data fields
+
+## @Path
+
+The `@Path` macro marks a parameter as a URL path component. Path parameters are interpolated into the endpoint path using curly brace syntax.
+
+### Basic Usage
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("{id}")
+    func getQuote(@Path id: String) async throws -> Quote
+}
+
+// Usage
+let quote = try await service.getQuote(id: "69Ldsxcdm-")
+// GET https://api.quotable.io/quotes/69Ldsxcdm-
+```
+
+### With Argument Labels
+
+```swift
+@GET("{id}")
+func getQuote(@Path by id: String) async throws -> Quote
+
+// Usage
+let quote = try await service.getQuote(by: "69Ldsxcdm-")
+```
+
+### Multiple Path Parameters
+
+```swift
+@POST("hello/{id}/{limit}")
+func hello(@Path id: String, @Path limit: Int) async throws -> [Int]
+
+// Usage
+let result = try await service.hello(id: "abc", limit: 10)
+// POST https://api.example.com/sample/hello/abc/10
+```
+
+### Custom Parameter Names
+
+You can specify a custom name for the path parameter:
+
+```swift
+@GET("users/{userId}")
+func getUser(@Path("userId") id: String) async throws -> User
+
+// The parameter name in code is 'id', but it maps to '{userId}' in the path
+```
+
+<ParamField path="name" type="String" default="parameter name">
+  The name of the path parameter in the URL template. If not specified, uses the function parameter name.
+</ParamField>
+
+<Warning>
+Path parameters cannot be optional. They must always have a concrete value:
+
+```swift
+// ❌ Invalid - will cause compilation error
+@GET("{id}")
+func getQuote(@Path id: String?) async throws -> Quote
+
+// ✅ Valid
+@GET("{id}")
+func getQuote(@Path id: String) async throws -> Quote
+```
+</Warning>
+
+## @QueryParam
+
+The `@QueryParam` macro adds parameters to the URL query string.
+
+### Basic Usage
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+}
+
+// Usage
+let quotes = try await service.getRandomQuotes(limit: 3)
+// GET https://api.quotable.io/quotes/random?limit=3
+```
+
+### Optional Query Parameters
+
+```swift
+@GET("search")
+func search(
+    @QueryParam query: String,
+    @QueryParam page: Int?,
+    @QueryParam limit: Int?
+) async throws -> SearchResults
+
+// Usage
+let results = try await service.search(query: "swift", page: nil, limit: 20)
+// GET https://api.example.com/search?query=swift&limit=20
+```
+
+<Note>
+Optional query parameters are automatically omitted from the request if `nil`. The generated implementation adds `= nil` as the default value.
+</Note>
+
+### Custom Parameter Names
+
+```swift
+@GET("users")
+func getUsers(@QueryParam("max_results") limit: Int?) async throws -> [User]
+
+// Usage
+let users = try await service.getUsers(limit: 50)
+// GET https://api.example.com/users?max_results=50
+```
+
+<ParamField path="name" type="String" default="parameter name">
+  The name of the query parameter in the URL. If not specified, uses the function parameter name.
+</ParamField>
+
+### Type Conversion
+
+Query parameters are converted to strings using `CustomStringConvertible`:
+
+```swift
+@GET("items")
+func getItems(
+    @QueryParam active: Bool,
+    @QueryParam count: Int,
+    @QueryParam rating: Double
+) async throws -> [Item]
+
+// All types are automatically converted to string representations
+```
+
+## @Header
+
+The `@Header` macro adds HTTP headers to the request.
+
+### Basic Usage
+
+```swift
+@Service
+protocol APIService {
+    @GET("protected")
+    func getProtectedResource(@Header("Authorization") token: String) async throws -> Data
+}
+
+// Usage
+let data = try await service.getProtectedResource(token: "Bearer abc123")
+// Headers: Authorization: Bearer abc123
+```
+
+### Multiple Headers
+
+```swift
+@POST("data")
+func uploadData(
+    @Header("Authorization") token: String,
+    @Header("Content-Type") contentType: String,
+    @Header("X-API-Version") version: String,
+    @Body data: UploadData
+) async throws -> Response
+```
+
+### Optional Headers
+
+```swift
+@GET("items")
+func getItems(
+    @Header("Authorization") token: String?,
+    @Header("X-Request-ID") requestId: String?
+) async throws -> [Item]
+```
+
+<ParamField path="name" type="String" default="parameter name">
+  The HTTP header name. If not specified, uses the function parameter name (which is typically not what you want for headers).
+</ParamField>
+
+<Tip>
+Always specify the header name explicitly with `@Header("Header-Name")` to follow HTTP header naming conventions.
+</Tip>
+
+## @Body
+
+The `@Body` macro designates a parameter as the request body, which is automatically JSON-encoded.
+
+### Basic Usage
+
+```swift
+@Service(resource: "users")
+protocol UserService {
+    @POST
+    func createUser(@Body user: User) async throws -> User
+}
+
+// Usage
+let newUser = User(name: "John", email: "john@example.com")
+let created = try await service.createUser(user: newUser)
+```
+
+### With Path Parameters
+
+```swift
+@PUT("{id}")
+func updateUser(@Path id: String, @Body user: User) async throws -> User
+
+// Usage
+let updated = try await service.updateUser(id: "123", user: updatedUser)
+// PUT https://api.example.com/users/123
+// Body: {"name":"John","email":"john@example.com"}
+```
+
+### Encodable Types
+
+Any `Encodable` type can be used as a body:
+
+```swift
+struct CreatePostRequest: Encodable {
+    let title: String
+    let content: String
+    let tags: [String]
+}
+
+@POST("posts")
+func createPost(@Body request: CreatePostRequest) async throws -> Post
+```
+
+<Warning>
+Only one `@Body` parameter is allowed per method. Multiple `@Body` parameters will cause a compilation error:
+
+```swift
+// ❌ Invalid - multiple body parameters
+@POST("posts")
+func createPost(@Body post: Post, @Body metadata: Metadata) async throws -> Post
+
+// ✅ Valid - combine into single type
+struct CreatePostRequest: Encodable {
+    let post: Post
+    let metadata: Metadata
+}
+
+@POST("posts")
+func createPost(@Body request: CreatePostRequest) async throws -> Post
+```
+</Warning>
+
+<Note>
+The `@Body` macro uses `JSONEncoder` to serialize the parameter. Ensure your type conforms to `Encodable` and has appropriate coding keys if needed.
+</Note>
+
+## @FormField
+
+The `@FormField` macro adds parameters as URL-encoded form fields, typically used for form submissions.
+
+### Basic Usage
+
+```swift
+@Service
+protocol AuthService {
+    @POST("login")
+    func login(
+        @FormField username: String,
+        @FormField password: String
+    ) async throws -> AuthToken
+}
+
+// Usage
+let token = try await service.login(username: "john", password: "secret")
+// Content-Type: application/x-www-form-urlencoded
+// Body: username=john&password=secret
+```
+
+### Multiple Form Fields
+
+```swift
+@POST("register")
+func register(
+    @FormField username: String,
+    @FormField email: String,
+    @FormField password: String,
+    @FormField("accept_terms") acceptTerms: Bool
+) async throws -> User
+```
+
+### Optional Form Fields
+
+```swift
+@POST("profile")
+func updateProfile(
+    @FormField name: String,
+    @FormField bio: String?,
+    @FormField website: String?
+) async throws -> Profile
+```
+
+<ParamField path="name" type="String" default="parameter name">
+  The form field name. If not specified, uses the function parameter name.
+</ParamField>
+
+<Warning>
+Do not mix `@Body` and `@FormField` in the same method. They represent different content types:
+- `@Body` → `application/json`
+- `@FormField` → `application/x-www-form-urlencoded`
+</Warning>
+
+## Combining Parameters
+
+You can use multiple parameter types in a single method:
+
+```swift
+@Service(resource: "api")
+protocol ComplexService {
+    @POST("users/{userId}/posts")
+    func createPost(
+        @Path userId: String,
+        @Header("Authorization") token: String,
+        @QueryParam featured: Bool?,
+        @Body post: Post
+    ) async throws -> Post
+}
+
+// Usage
+let post = try await service.createPost(
+    userId: "123",
+    token: "Bearer abc",
+    featured: true,
+    post: newPost
+)
+// POST https://api.example.com/api/users/123/posts?featured=true
+// Headers: Authorization: Bearer abc
+// Body: {"title":"...","content":"..."}
+```
+
+## Parameter Validation
+
+SwiftRequest validates parameters at compile time:
+
+### Missing Path Parameters
+
+```swift
+// ❌ Compilation error: missing @Path parameter
+@GET("users/{id}")
+func getUser() async throws -> User
+```
+
+### Extra Path Parameters
+
+```swift
+// ❌ Compilation error: extra @Path parameter not in URL
+@GET("users")
+func getUsers(@Path id: String) async throws -> [User]
+```
+
+### Path/Parameter Name Mismatch
+
+```swift
+// ❌ Compilation error: path parameter 'userId' not found
+@GET("users/{userId}")
+func getUser(@Path id: String) async throws -> User
+
+// ✅ Fixed
+@GET("users/{id}")
+func getUser(@Path id: String) async throws -> User
+```
+
+## Generated Code
+
+Here's how parameters are transformed in the generated implementation:
+
+```swift
+// Source
+@GET("{id}")
+func getQuote(@Path by id: String) async throws -> Quote
+
+@GET("random")
+func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+
+// Generated
+func getQuote(by id: String) async throws -> Quote {
+    let request = Request(
+        url: resourceURL.appendingPathComponent("\(id)")
+    )
+    return try await executor(request)
+}
+
+func getRandomQuotes(limit: Int? = nil) async throws -> [Quote] {
+    let request = Request(
+        url: resourceURL.appendingPathComponent("random"),
+        queryParams: ["limit": limit]
+    )
+    return try await executor(request)
+}
+```
+
+## Best Practices
+
+1. **Use typed parameters**: Leverage Swift's type system for compile-time safety
+2. **Make query parameters optional**: Use `Int?`, `String?`, etc. for optional query parameters
+3. **Explicit header names**: Always specify header names: `@Header("Authorization")`
+4. **Single responsibility**: Each parameter type serves a specific purpose
+5. **Validate at compile time**: Let the macro system catch parameter mismatches early

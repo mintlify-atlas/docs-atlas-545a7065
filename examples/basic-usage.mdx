@@ -1,0 +1,314 @@
+---
+title: Basic Usage Examples
+description: Learn the fundamentals of SwiftRequest with simple, practical examples
+---
+
+## Complete QuoteService Example
+
+This example demonstrates a complete working service that fetches quotes from an API.
+
+<CodeGroup>
+
+```swift Quote Model
+struct Quote: Codable {
+    let id: String
+    let content: String
+    let author: String
+    let tags: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case content
+        case author
+        case tags
+    }
+}
+```
+
+```swift Service Definition
+import SwiftRequest
+
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+```
+
+```swift Usage
+import SwiftRequest
+
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io"
+)
+
+do {
+    // Fetch 3 random quotes
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    // Fetch a specific quote by ID
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch {
+    print("Error: \(error)")
+}
+```
+
+</CodeGroup>
+
+## Simple GET Request
+
+The simplest way to make a GET request is to define a method with the `@GET` macro.
+
+```swift
+import SwiftRequest
+
+@Service(resource: "users")
+protocol UserService {
+    @GET
+    func getUsers() async throws -> [User]
+}
+
+// Usage
+let service = UserServiceImpl(baseURL: "https://api.example.com")
+let users = try await service.getUsers()
+```
+
+## GET with Query Parameters
+
+Use `@QueryParam` to add query parameters to your requests. Parameters are automatically URL-encoded.
+
+<Tabs>
+  <Tab title="Optional Parameters">
+    ```swift
+    @Service(resource: "quotes")
+    protocol QuoteService {
+        @GET("random")
+        func getRandomQuotes(
+            @QueryParam limit: Int?,
+            @QueryParam tags: String?
+        ) async throws -> [Quote]
+    }
+    
+    // Usage
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    
+    // With parameters
+    let quotes = try await service.getRandomQuotes(limit: 5, tags: "wisdom")
+    
+    // Without parameters (nil values are omitted)
+    let allQuotes = try await service.getRandomQuotes(limit: nil, tags: nil)
+    ```
+  </Tab>
+  
+  <Tab title="Required Parameters">
+    ```swift
+    @Service(resource: "search")
+    protocol SearchService {
+        @GET
+        func search(
+            @QueryParam q: String,
+            @QueryParam page: Int
+        ) async throws -> SearchResults
+    }
+    
+    // Usage
+    let service = SearchServiceImpl(baseURL: "https://api.example.com")
+    let results = try await service.search(q: "swift", page: 1)
+    // Generates: GET /search?q=swift&page=1
+    ```
+  </Tab>
+  
+  <Tab title="Custom Parameter Names">
+    ```swift
+    @Service(resource: "articles")
+    protocol ArticleService {
+        @GET
+        func listArticles(
+            @QueryParam("max_results") limit: Int,
+            @QueryParam("sort_by") sortBy: String
+        ) async throws -> [Article]
+    }
+    
+    // Usage
+    let service = ArticleServiceImpl(baseURL: "https://api.example.com")
+    let articles = try await service.listArticles(limit: 10, sortBy: "date")
+    // Generates: GET /articles?max_results=10&sort_by=date
+    ```
+  </Tab>
+</Tabs>
+
+## GET with Path Parameters
+
+Use `@Path` to insert values into the URL path. Path parameters are specified using curly braces `{param}` in the path string.
+
+<Tabs>
+  <Tab title="Single Path Parameter">
+    ```swift
+    @Service(resource: "quotes")
+    protocol QuoteService {
+        @GET("{id}")
+        func getQuote(@Path by id: String) async throws -> Quote
+    }
+    
+    // Usage
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    // Generates: GET /quotes/69Ldsxcdm-
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Path Parameters">
+    ```swift
+    @Service(resource: "users")
+    protocol UserService {
+        @GET("{userId}/posts/{postId}")
+        func getPost(
+            @Path userId: String,
+            @Path postId: Int
+        ) async throws -> Post
+    }
+    
+    // Usage
+    let service = UserServiceImpl(baseURL: "https://api.example.com")
+    let post = try await service.getPost(userId: "john", postId: 42)
+    // Generates: GET /users/john/posts/42
+    ```
+  </Tab>
+  
+  <Tab title="Custom Argument Labels">
+    ```swift
+    @Service(resource: "sample")
+    protocol SampleService {
+        @POST("hello/{id}/{limit}")
+        func hello(
+            @Path id: String,
+            @Path limit: Int
+        ) async throws -> [Int]
+    }
+    
+    // Usage
+    let service = SampleServiceImpl(baseURL: "https://api.example.com")
+    let result = try await service.hello(id: "abc123", limit: 10)
+    // Generates: POST /sample/hello/abc123/10
+    ```
+  </Tab>
+</Tabs>
+
+## POST with Body
+
+Use `@Body` to send data in the request body. The body is automatically encoded as JSON.
+
+<Tabs>
+  <Tab title="Simple POST">
+    ```swift
+    struct CreateUserRequest: Codable {
+        let name: String
+        let email: String
+    }
+    
+    struct User: Codable {
+        let id: String
+        let name: String
+        let email: String
+    }
+    
+    @Service(resource: "users")
+    protocol UserService {
+        @POST
+        func createUser(@Body user: CreateUserRequest) async throws -> User
+    }
+    
+    // Usage
+    let service = UserServiceImpl(baseURL: "https://api.example.com")
+    let request = CreateUserRequest(name: "John Doe", email: "john@example.com")
+    let user = try await service.createUser(user: request)
+    ```
+  </Tab>
+  
+  <Tab title="POST with Path Parameters">
+    ```swift
+    struct Comment: Codable {
+        let text: String
+    }
+    
+    @Service(resource: "posts")
+    protocol PostService {
+        @POST("{postId}/comments")
+        func addComment(
+            @Path postId: String,
+            @Body comment: Comment
+        ) async throws -> Comment
+    }
+    
+    // Usage
+    let service = PostServiceImpl(baseURL: "https://api.example.com")
+    let comment = Comment(text: "Great post!")
+    let result = try await service.addComment(postId: "123", comment: comment)
+    // Generates: POST /posts/123/comments
+    ```
+  </Tab>
+  
+  <Tab title="PUT/PATCH Requests">
+    ```swift
+    struct UpdateUserRequest: Codable {
+        let name: String?
+        let email: String?
+    }
+    
+    @Service(resource: "users")
+    protocol UserService {
+        @PUT("{id}")
+        func updateUser(
+            @Path id: String,
+            @Body updates: UpdateUserRequest
+        ) async throws -> User
+        
+        @PATCH("{id}")
+        func patchUser(
+            @Path id: String,
+            @Body updates: UpdateUserRequest
+        ) async throws -> User
+    }
+    
+    // Usage
+    let service = UserServiceImpl(baseURL: "https://api.example.com")
+    let updates = UpdateUserRequest(name: "Jane Doe", email: nil)
+    let user = try await service.updateUser(id: "123", updates: updates)
+    ```
+  </Tab>
+</Tabs>
+
+## Other HTTP Methods
+
+SwiftRequest supports all standard HTTP methods.
+
+```swift
+@Service(resource: "posts")
+protocol PostService {
+    @GET("{id}")
+    func getPost(@Path id: String) async throws -> Post
+    
+    @POST
+    func createPost(@Body post: Post) async throws -> Post
+    
+    @PUT("{id}")
+    func updatePost(@Path id: String, @Body post: Post) async throws -> Post
+    
+    @PATCH("{id}")
+    func patchPost(@Path id: String, @Body updates: PartialPost) async throws -> Post
+    
+    @DELETE("{id}")
+    func deletePost(@Path id: String) async throws
+    
+    @HEAD("{id}")
+    func checkPost(@Path id: String) async throws
+    
+    @OPTIONS
+    func getOptions() async throws
+}
+```

@@ -1,0 +1,411 @@
+---
+title: Making Requests
+description: Learn how to create service instances and execute HTTP requests
+---
+
+Once you've defined your service protocol with the `@Service` macro, SwiftRequest generates an implementation class that you can instantiate and use to make HTTP requests.
+
+## Creating Service Instances
+
+<Steps>
+  <Step title="Import SwiftRequest">
+    ```swift
+    import SwiftRequest
+    import Foundation
+    ```
+  </Step>
+
+  <Step title="Instantiate the generated service">
+    The macro generates a class with the suffix `Impl`. For a protocol named `QuoteService`, you'll get `QuoteServiceImpl`:
+
+    ```swift
+    let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+    ```
+  </Step>
+
+  <Step title="Call service methods">
+    Use async/await to call the service methods:
+
+    ```swift
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    ```
+  </Step>
+</Steps>
+
+## Service Initialization
+
+### Basic Initialization
+
+The simplest way to create a service is with a base URL string:
+
+```swift
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+```
+
+This uses the default `URLSessionServiceExecutor` with `URLSession.shared`.
+
+### With URL Object
+
+You can also pass a `URL` object:
+
+```swift
+let baseURL = URL(string: "https://api.quotable.io")!
+let service = QuoteServiceImpl(baseURL: baseURL)
+```
+
+### With Custom URLSession
+
+Provide a custom `URLSession` for advanced configuration:
+
+```swift
+let configuration = URLSessionConfiguration.default
+configuration.timeoutIntervalForRequest = 30
+configuration.httpAdditionalHeaders = ["User-Agent": "MyApp/1.0"]
+
+let session = URLSession(configuration: configuration)
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io", session: session)
+```
+
+### With Custom Executor
+
+Use a custom executor for complete control over request execution:
+
+```swift
+let executor = URLSessionServiceExecutor(customSession)
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+```
+
+See [Custom Executors](/guides/custom-executors) for more details.
+
+## Calling Service Methods
+
+### Simple GET Request
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+
+// Usage
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+let quote = try await service.getQuote(by: "69Ldsxcdm-")
+print(quote.content)
+print(quote.author)
+```
+
+### GET with Query Parameters
+
+```swift
+@GET("random")
+func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+
+// Usage
+let quotes = try await service.getRandomQuotes(limit: 5)
+for quote in quotes {
+    print("\(quote.author): \(quote.content)")
+}
+```
+
+### POST with Request Body
+
+```swift
+struct CreatePostRequest: Codable {
+    let title: String
+    let content: String
+}
+
+@POST("posts")
+func createPost(@Body request: CreatePostRequest) async throws -> Post
+
+// Usage
+let newPost = CreatePostRequest(
+    title: "Hello, World!",
+    content: "This is my first post."
+)
+let post = try await service.createPost(request: newPost)
+print("Created post with ID: \(post.id)")
+```
+
+### Requests with Path Parameters
+
+```swift
+@Service(resource: "sample")
+protocol SampleService {
+    @POST("hello/{id}/{limit}")
+    func hello(@Path id: String, @Path limit: Int) async throws -> [Int]
+}
+
+// Usage
+let service = SampleServiceImpl(baseURL: "https://api.example.com")
+let result = try await service.hello(id: "abc123", limit: 10)
+print(result)
+```
+
+## Async/Await Patterns
+
+All service methods use Swift's async/await for clean, readable asynchronous code.
+
+### Sequential Requests
+
+Make requests one after another:
+
+```swift
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print("Fetched \(quotes.count) quotes")
+    
+    let firstQuote = try await service.getQuote(by: quotes[0].id)
+    print("First quote: \(firstQuote.content)")
+} catch {
+    print("Error: \(error)")
+}
+```
+
+### Concurrent Requests
+
+Make multiple requests in parallel:
+
+```swift
+async let quote1 = service.getQuote(by: "id1")
+async let quote2 = service.getQuote(by: "id2")
+async let quote3 = service.getQuote(by: "id3")
+
+do {
+    let quotes = try await [quote1, quote2, quote3]
+    print("Fetched \(quotes.count) quotes concurrently")
+} catch {
+    print("Error: \(error)")
+}
+```
+
+### Task Groups
+
+Fetch multiple items dynamically:
+
+```swift
+let ids = ["id1", "id2", "id3", "id4", "id5"]
+
+await withThrowingTaskGroup(of: Quote.self) { group in
+    for id in ids {
+        group.addTask {
+            try await service.getQuote(by: id)
+        }
+    }
+    
+    var quotes: [Quote] = []
+    for try await quote in group {
+        quotes.append(quote)
+        print("Fetched: \(quote.author)")
+    }
+    return quotes
+}
+```
+
+## Handling Responses
+
+### Automatic JSON Decoding
+
+Responses are automatically decoded to your specified type:
+
+```swift
+struct Quote: Codable {
+    let id: String
+    let content: String
+    let author: String
+    let tags: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case content
+        case author
+        case tags
+    }
+}
+
+let quote: Quote = try await service.getQuote(by: "69Ldsxcdm-")
+// Automatically decoded from JSON
+```
+
+### Array Responses
+
+```swift
+let quotes: [Quote] = try await service.getRandomQuotes(limit: 5)
+print("Received \(quotes.count) quotes")
+```
+
+### Optional Fields
+
+Use optional properties for fields that may be absent:
+
+```swift
+struct User: Codable {
+    let id: String
+    let name: String
+    let email: String?
+    let phone: String?
+}
+```
+
+## Complete Example
+
+Here's a complete example from the SwiftRequest Examples directory:
+
+```swift
+import Foundation
+import SwiftRequest
+
+// Response model
+struct Quote: Codable {
+    let id: String
+    let content: String
+    let author: String
+    let tags: [String]
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case content
+        case author
+        case tags
+    }
+}
+
+// Service definition
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+
+// Usage
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch {
+    print(error)
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Reuse service instances">
+    Create service instances once and reuse them:
+
+    ```swift
+    class APIClient {
+        static let shared = APIClient()
+        
+        let quoteService: QuoteServiceImpl
+        let userService: UserServiceImpl
+        
+        private init() {
+            let baseURL = "https://api.example.com"
+            self.quoteService = QuoteServiceImpl(baseURL: baseURL)
+            self.userService = UserServiceImpl(baseURL: baseURL)
+        }
+    }
+
+    // Usage
+    let quotes = try await APIClient.shared.quoteService.getRandomQuotes(limit: 5)
+    ```
+  </Accordion>
+
+  <Accordion title="Configure URLSession appropriately">
+    Set timeouts, headers, and other configuration:
+
+    ```swift
+    let configuration = URLSessionConfiguration.default
+    configuration.timeoutIntervalForRequest = 30
+    configuration.timeoutIntervalForResource = 300
+    configuration.httpAdditionalHeaders = [
+        "User-Agent": "MyApp/1.0",
+        "Accept": "application/json"
+    ]
+
+    let session = URLSession(configuration: configuration)
+    let service = QuoteServiceImpl(baseURL: baseURL, session: session)
+    ```
+  </Accordion>
+
+  <Accordion title="Use Task for background operations">
+    Wrap service calls in Task for proper async context:
+
+    ```swift
+    Task {
+        do {
+            let quotes = try await service.getRandomQuotes(limit: 5)
+            // Update UI
+            await MainActor.run {
+                self.quotes = quotes
+            }
+        } catch {
+            // Handle error
+            print("Failed to fetch quotes: \(error)")
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    Always handle potential errors from network requests:
+
+    ```swift
+    do {
+        let quotes = try await service.getRandomQuotes(limit: 5)
+        processQuotes(quotes)
+    } catch let error as HTTPResponseError {
+        print("HTTP Error \(error.response.statusCode)")
+    } catch {
+        print("Request failed: \(error)")
+    }
+    ```
+
+    See [Error Handling](/guides/error-handling) for more details.
+  </Accordion>
+</AccordionGroup>
+
+## Switching Executors
+
+You can easily switch between different executor implementations:
+
+```swift
+let useAlamofire: Bool = Bool.random()
+print("Using Alamofire: \(useAlamofire)")
+
+let executor: any ServiceExecutor = if useAlamofire {
+    AlamofireServiceExecutor()
+} else {
+    URLSessionServiceExecutor()
+}
+
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: executor
+)
+
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch {
+    print(error)
+}
+```
+
+This example is from Examples/Sources/main.swift:4-23 and demonstrates the flexibility of the executor pattern.

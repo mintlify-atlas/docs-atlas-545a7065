@@ -1,0 +1,182 @@
+---
+title: Services
+description: Learn how to define API services using the @Service macro in SwiftRequest
+---
+
+## What are Services?
+
+Services in SwiftRequest are protocol-based abstractions that represent API endpoints. They combine a base URL with an optional resource path and contain method declarations for API operations. The `@Service` macro automatically generates a concrete implementation class that handles request construction and execution.
+
+## How Services Work
+
+When you annotate a protocol with `@Service`, the macro generates a companion implementation class (suffixed with `Impl`) that:
+
+1. Inherits from the base `Service` class
+2. Implements your protocol interface
+3. Constructs and executes HTTP requests based on method annotations
+4. Handles response decoding automatically
+
+## Defining a Service Protocol
+
+To create a service, define a protocol and annotate it with `@Service`:
+
+```swift
+import SwiftRequest
+
+@Service
+protocol APIService {
+    @GET("users")
+    func getUsers() async throws -> [User]
+}
+```
+
+This generates an `APIServiceImpl` class that you can instantiate with a base URL.
+
+## The @Service Macro
+
+The `@Service` macro comes in two variants:
+
+### Without Resource Parameter
+
+```swift
+@Service
+protocol UserService {
+    @GET("users")
+    func getUsers() async throws -> [User]
+    
+    @GET("users/{id}")
+    func getUser(@Path id: String) async throws -> User
+}
+```
+
+All endpoint paths are relative to the `baseURL` provided during initialization.
+
+### With Resource Parameter
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+```
+
+The `resource` parameter adds a path component to the base URL. All method paths are then relative to `baseURL/resource`.
+
+<Note>
+Using the `resource` parameter is useful when all endpoints in a service share a common path prefix. For example, if your base URL is `https://api.example.com` and the resource is `"quotes"`, all requests will be made to `https://api.example.com/quotes/*`.
+</Note>
+
+## Generated Implementation
+
+For a service with a resource:
+
+```swift
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+}
+```
+
+The macro generates:
+
+```swift
+class QuoteServiceImpl: Service, QuoteService {
+    private lazy var resourceURL: URL = baseURL.appendingPathComponent("quotes")
+    
+    func getRandomQuotes(limit: Int? = nil) async throws -> [Quote] {
+        let request = Request(
+            url: resourceURL.appendingPathComponent("random"),
+            queryParams: ["limit": limit]
+        )
+        return try await executor(request)
+    }
+}
+```
+
+<Tip>
+The generated implementation automatically:
+- Removes parameter macro annotations from the method signature
+- Adds default values for optional parameters
+- Constructs the full URL by combining base URL, resource, and path
+- Builds the Request object with appropriate parameters
+</Tip>
+
+## Using Service Implementations
+
+Once your service protocol is defined, instantiate the generated implementation:
+
+```swift
+let service = QuoteServiceImpl(
+    baseURL: "https://api.quotable.io",
+    executor: URLSessionServiceExecutor()
+)
+
+do {
+    let quotes = try await service.getRandomQuotes(limit: 3)
+    print(quotes)
+    
+    let quote = try await service.getQuote(by: "69Ldsxcdm-")
+    print(quote)
+} catch {
+    print("Error: \(error)")
+}
+```
+
+The base `Service` class provides several convenience initializers:
+
+<ParamField path="baseURL" type="URL" required>
+  The base URL for all API requests
+</ParamField>
+
+<ParamField path="executor" type="ServiceExecutor" default="URLSessionServiceExecutor()">
+  The executor responsible for performing HTTP requests
+</ParamField>
+
+<ParamField path="session" type="URLSession">
+  Alternative initializer that creates a URLSessionServiceExecutor with a custom session
+</ParamField>
+
+## Complete Example
+
+Here's a complete example from the SwiftRequest source:
+
+```swift
+import Foundation
+import SwiftRequest
+
+@Service(resource: "quotes")
+protocol QuoteService {
+    @GET("random")
+    func getRandomQuotes(@QueryParam limit: Int?) async throws -> [Quote]
+    
+    @GET("{id}")
+    func getQuote(@Path by id: String) async throws -> Quote
+}
+
+struct Quote: Codable {
+    let _id: String
+    let content: String
+    let author: String
+}
+
+// Usage
+let service = QuoteServiceImpl(baseURL: "https://api.quotable.io")
+let quotes = try await service.getRandomQuotes(limit: 5)
+```
+
+<Warning>
+Service protocols must only contain method declarations with HTTP method macros (`@GET`, `@POST`, etc.). Adding methods without these macros will result in a compilation error.
+</Warning>
+
+## Key Concepts
+
+- **Protocol-based**: Services are defined as protocols, making them easy to mock for testing
+- **Automatic implementation**: The `@Service` macro generates the implementation class
+- **Type-safe**: All parameters and return types are checked at compile time
+- **Resource grouping**: Use the `resource` parameter to group related endpoints
+- **Flexible execution**: Swap executors to use different HTTP libraries (URLSession, Alamofire, etc.)
