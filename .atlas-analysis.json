@@ -1,0 +1,78 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "SwiftRequest",
+  "projectDescription": "A lightweight, type-safe HTTP client for Swift using macros to streamline API service definitions",
+  "theme": "palm",
+  "primaryColor": "#F05138",
+  "lightColor": "#FF6B4A",
+  "darkColor": "#D94426",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Core Concepts",
+        "pages": [
+          "concepts/services",
+          "concepts/http-methods",
+          "concepts/parameters",
+          "concepts/service-executors"
+        ]
+      },
+      {
+        "group": "Guides",
+        "pages": [
+          "guides/defining-services",
+          "guides/making-requests",
+          "guides/custom-executors",
+          "guides/error-handling"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/service-macro",
+          "api/http-method-macros",
+          "api/parameter-macros",
+          "api/service-class",
+          "api/request-struct",
+          "api/service-executor"
+        ]
+      },
+      {
+        "group": "Examples",
+        "pages": [
+          "examples/basic-usage",
+          "examples/advanced-patterns"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe HTTP client using Swift macros",
+    "Declarative service definitions with protocol-based approach",
+    "Built-in support for all HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)",
+    "Flexible parameter handling (path, query, header, body, form fields)",
+    "Customizable service executors for different networking backends",
+    "Async/await support for modern Swift concurrency",
+    "Automatic JSON encoding/decoding",
+    "Built on Swift 5.9+ macro system"
+  ],
+  "publicApiSurface": [
+    "@Service macro",
+    "@GET, @POST, @PUT, @PATCH, @DELETE, @HEAD, @OPTIONS macros",
+    "@Path, @QueryParam, @Header, @Body, @FormField parameter macros",
+    "Service class",
+    "Request struct",
+    "ServiceExecutor protocol",
+    "URLSessionServiceExecutor class",
+    "ServiceContainer class",
+    "HTTPResponseError"
+  ]
+}
